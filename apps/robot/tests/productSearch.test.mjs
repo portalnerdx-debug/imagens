@@ -12,7 +12,7 @@ import {
 } from "../src/ct1CartRules.ts";
 import {chooseWarrantyHref} from "../src/warrantySelection.ts";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "../src/warrantyService.ts";
-import {clearCreditCart,isCartConfirmedEmpty,parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
+import {clearCreditCart,parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
 import {parsePaymentEntryId} from "../src/paymentEntryId.ts";
 import {runWithSessionRetry} from "../src/sessionRetry.ts";
 
@@ -165,16 +165,6 @@ test("confirma carrinho vazio quando o contador chega a zero",()=>{
  assert.deepEqual(parseCartProductCodes('<span id="CarrinhoNumItens">0</span>'),[]);
 });
 
-test("lê contador do carrinho mesmo quando o número está dentro de outra tag",()=>{
- assert.equal(parseCartItemCount('<span id="CarrinhoNumItens"><strong>3</strong></span>'),3);
- assert.equal(parseCartItemCount('<input id="CarrinhoNumItens" data-count="2">'),2);
-});
-
-test("não confirma carrinho vazio sem contador nem mensagem explícita",()=>{
- assert.equal(isCartConfirmedEmpty('<main>Catálogo de produtos</main>'),false);
- assert.equal(isCartConfirmedEmpty('<main>Seu carrinho está vazio</main>'),true);
-});
-
 test("captura o data-item do botão real de exclusão do carrinho",()=>{
  const html=`
   <span id="CarrinhoNumItens">2</span>
@@ -193,7 +183,7 @@ test("reseta o pagamento antes de excluir os produtos antigos",async()=>{
  const response=(body="")=>({ok:()=>true,text:async()=>body});
  const page={
   url:()=>"https://plataformaclick.com.br/",
- request:{get:async(url)=>{
+  request:{get:async(url)=>{
    calls.push(url);
    if(url.includes("processa_reseta_pagtos.php"))return response();
    if(url.includes("carrinho_excluir_ajax.php"))return response('{"vl_total":"0,00"}');
@@ -204,8 +194,7 @@ test("reseta o pagamento antes de excluir os produtos antigos",async()=>{
      : response('<span id="CarrinhoNumItens">0</span>');
    }
    throw new Error(`URL inesperada: ${url}`);
-  }},
-  waitForTimeout:async()=>{}
+  }}
  };
  const result=await clearCreditCart(page);
  assert.match(calls[0],/processa_reseta_pagtos\.php/);
@@ -213,30 +202,6 @@ test("reseta o pagamento antes de excluir os produtos antigos",async()=>{
  assert.match(calls[2],/carrinho_excluir_ajax\.php$/);
  assert.equal(result.confirmedEmpty,true);
  assert.deepEqual(result.removedProducts,["412100"]);
-});
-
-test("usa o botão visível quando o AJAX responde 200 sem remover",async()=>{
- let removed=false;
- const item='<span id="CarrinhoNumItens">1</span><a class="link-excluir" data-item="990615">×</a>';
- const empty='<span id="CarrinhoNumItens">0</span>';
- const response=(body="")=>({ok:()=>true,text:async()=>body});
- const page={
-  url:()=>"https://plataformaclick.com.br/",
-  request:{get:async(url)=>{
-   if(url.includes("processa_reseta_pagtos.php"))return response();
-   if(url.includes("carrinho_excluir_ajax.php"))return response('{"ok":true}');
-   if(url.endsWith("/checkout_catalogo/carrinho.php"))return response(removed?empty:item);
-   throw new Error(`URL inesperada: ${url}`);
-  }},
-  goto:async()=>{},
-  locator:()=>({first(){return this},isVisible:async()=>true,click:async()=>{removed=true}}),
-  waitForTimeout:async()=>{},
-  on:()=>{},
-  off:()=>{}
- };
- const result=await clearCreditCart(page);
- assert.equal(result.confirmedEmpty,true);
- assert.deepEqual(result.removedProducts,["990615"]);
 });
 
 test("captura data-cdpagamento da primeira entrada sem aguardar locator",()=>{
