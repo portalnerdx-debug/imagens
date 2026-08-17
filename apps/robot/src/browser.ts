@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import {chromium} from "playwright";
-import {AUTH_FILE,CLICK_HEADLESS} from "./config.js";
+import {AUTH_FILE,CLICK_CHROMIUM_ARGS,CLICK_HEADLESS} from "./config.js";
 import {createFreshAuthenticatedState} from "./loginAuto.js";
 
 async function ensureState(){
@@ -11,7 +11,8 @@ export async function createClickContext(){
   await ensureState();
 
   const browser=await chromium.launch({
-    headless: CLICK_HEADLESS
+    headless:CLICK_HEADLESS,
+    args:CLICK_CHROMIUM_ARGS
   });
 
   const context=await browser.newContext({

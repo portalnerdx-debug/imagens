@@ -12,6 +12,8 @@ export const AUTH_FILE=path.join(AUTH_DIR,"click.json");
 export const PORT=Number(process.env.PORT||8081);
 export const CLICK_BASE_URL=(process.env.CLICK_BASE_URL||"https://plataformaclick.com.br").trim().replace(/\/$/,"");
 export const CLICK_HEADLESS=String(process.env.CLICK_HEADLESS??"true").toLowerCase()==="true";
+// Evita que o Chromium dependa do /dev/shm pequeno dos contêineres gratuitos.
+export const CLICK_CHROMIUM_ARGS=["--disable-dev-shm-usage"];
 export const CLICK_USERNAME=(process.env.CLICK_USERNAME||"").trim();
 export const CLICK_PASSWORD=process.env.CLICK_PASSWORD||"";
 export const CLICK_DEFAULT_CPF=(process.env.CLICK_DEFAULT_CPF||"").replace(/\D/g,"");

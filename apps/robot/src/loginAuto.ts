@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {chromium,type Page} from "playwright";
-import {AUTH_DIR,AUTH_FILE,CLICK_BASE_URL,CLICK_HEADLESS,CLICK_PASSWORD,CLICK_USERNAME,requireClickCredentials} from "./config.js";
+import {AUTH_DIR,AUTH_FILE,CLICK_BASE_URL,CLICK_CHROMIUM_ARGS,CLICK_HEADLESS,CLICK_PASSWORD,CLICK_USERNAME,requireClickCredentials} from "./config.js";
 
 async function firstVisible(page:Page,selectors:string[]){
  for(const selector of selectors){
@@ -50,7 +50,7 @@ export async function performAutomaticLogin(page:Page){
 
 export async function createFreshAuthenticatedState(){
  fs.mkdirSync(AUTH_DIR,{recursive:true});
- const browser=await chromium.launch({headless:CLICK_HEADLESS});
+ const browser=await chromium.launch({headless:CLICK_HEADLESS,args:CLICK_CHROMIUM_ARGS});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
  try{
   const page=await context.newPage();
