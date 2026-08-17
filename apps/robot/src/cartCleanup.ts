@@ -66,6 +66,15 @@ export async function clearCreditCart(page:Page){
  const removeUrl=`${origin}/checkout_catalogo/carrinho_excluir_ajax.php`;
  const headers={referer:page.url(),"x-requested-with":"XMLHttpRequest"};
 
+ // A própria tela da Click orienta resetar a condição de pagamento antes de
+ // voltar ao carrinho. Com pagamento antigo ativo, a exclusão pode responder
+ // 200 sem liberar os itens da sessão.
+ const reset=await page.request.get(`${origin}/checkout_catalogo/processa_reseta_pagtos.php`,{
+  params:{prevent_cache:new Date().toString(),_:String(Date.now())},
+  headers,timeout:60000
+ });
+ if(!reset.ok())throw new Error("CART_CLEANUP_FAILED");
+
  let current=await page.request.get(cartUrl,{headers,timeout:60000});
  if(!current.ok())throw new Error("CART_CLEANUP_FAILED");
  let html=await current.text();
@@ -104,13 +113,6 @@ export async function clearCreditCart(page:Page){
   });
   throw new Error("CART_CLEANUP_FAILED");
  }
-
- // Remove uma condição/entrada variável antiga que ainda esteja na sessão.
- const reset=await page.request.get(`${origin}/checkout_catalogo/processa_reseta_pagtos.php`,{
-  params:{prevent_cache:new Date().toString(),_:String(Date.now())},
-  headers,timeout:60000
- });
- if(!reset.ok())throw new Error("CART_CLEANUP_FAILED");
 
  return {removedProducts:[...removedProducts],confirmedEmpty:true};
 }
