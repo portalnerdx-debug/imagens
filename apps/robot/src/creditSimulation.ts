@@ -8,7 +8,7 @@ import {
 } from "./ct1CartRules.js";
 import {chooseWarrantyHref} from "./warrantySelection.js";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "./warrantyService.js";
-import {clearCreditCart,parseCartProductCodes} from "./cartCleanup.js";
+import {parseCartProductCodes} from "./cartCleanup.js";
 import {isPaymentEntryId,parsePaymentEntryId} from "./paymentEntryId.js";
 
 export type CreditPlan="48"|"CT1"|"CT2";
@@ -340,11 +340,6 @@ export async function simulateCredit(page:Page,req:CreditRequest){
 
  const cpf=(req.cpf||CLICK_DEFAULT_CPF).replace(/\D/g,"");
  if(cpf.length!==11)throw new Error("CPF_REQUIRED");
-
- // O carrinho é persistido nos cookies da sessão da Plataforma Click. Toda
- // simulação começa vazia para não somar produtos, garantia ou pagamento da
- // consulta anterior ao novo resultado.
- await clearCreditCart(page);
 
  const product=await searchProduct(page,req.code);
  if(!product.found)throw new Error("PRODUCT_NOT_FOUND");

@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import {ALLOWED_ORIGINS,CLICK_BASE_URL,PORT} from "./config.js";
-import {refreshClickSession,withAuthenticatedClickPage} from "./browser.js";
+import {refreshClickSession,withAuthenticatedClickPage,withFreshClickPage} from "./browser.js";
 import {searchProduct} from "./productSearch.js";
 import {simulateCredit} from "./creditSimulation.js";
 import {verifyFirebaseBearer} from "./firebaseAuth.js";
@@ -80,7 +80,9 @@ app.post("/api/credit/simulate",auth,async(req,res)=>{
   warranty:Boolean(body.warranty)
  };
  try{
-  res.json(await withAuthenticatedClickPage(page=>simulateCredit(page,request)));
+  // Não reaproveita o carrinho da consulta anterior. Cada simulação recebe
+  // um login/sessão novo antes de abrir a Plataforma Click.
+  res.json(await withFreshClickPage(page=>simulateCredit(page,request)));
  }catch(e){
   console.error("[POST /api/credit/simulate]",e);
   const error=publicError(e);

@@ -4,10 +4,10 @@ export function isClickSessionExpired(error:unknown){
 
 export function needsFreshClickSession(error:unknown){
  if(!(error instanceof Error))return false;
- return error.message==="CLICK_SESSION_EXPIRED"||error.message==="CART_CLEANUP_FAILED";
+ return error.message==="CLICK_SESSION_EXPIRED";
 }
 
-/** Repete somente uma vez quando a sessão expirou ou o carrinho ficou preso. */
+/** Repete somente uma vez quando a sessão criada para a consulta expirou. */
 export async function runWithSessionRetry<T>(
  task:(attempt:0|1)=>Promise<T>,refresh:()=>Promise<void>
 ):Promise<T>{

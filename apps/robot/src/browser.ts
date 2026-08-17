@@ -50,7 +50,13 @@ export async function withAuthenticatedClickPage<T>(task:(page:Page)=>Promise<T>
    await close();
   }
  },async()=>{
-  console.warn("[robot] Sessão expirada ou carrinho não zerado; criando uma sessão Click nova e repetindo uma vez.");
+  console.warn("[robot] Sessão expirada; criando uma sessão Click nova e repetindo uma vez.");
   await refreshClickSession();
  });
+}
+
+/** Cada consulta de crediário começa com um login novo e um carrinho novo. */
+export async function withFreshClickPage<T>(task:(page:Page)=>Promise<T>){
+ await refreshClickSession();
+ return withAuthenticatedClickPage(task);
 }
