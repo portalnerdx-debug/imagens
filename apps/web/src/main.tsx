@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { auth } from "./firebase";
 import "./styles.css";
+import "./app-layout.css";
 import { ProductIntelligence } from "./ProductIntelligence";
 import { CustomerInsight } from "./CustomerInsight";
 import { SalesCopilot } from "./SalesCopilot";
@@ -43,8 +44,9 @@ import { SmartAttendanceGuide } from "./SmartAttendanceGuide";
 import { CustomerSignalPanel } from "./CustomerSignalPanel";
 import { customerSignalDefinitions, signalNotes, type CustomerSignalId } from "./CustomerSignalModel";
 import { buildSmartSaleGuide, type PaymentPreference, type PurchaseTiming, type SalePriority } from "./SmartSaleGuide";
+import { AppIcon, type AppIconName } from "./AppIcon";
 
-const ROBOT_URL = import.meta.env.VITE_ROBOT_URL || "http://localhost:8081";
+const ROBOT_URL = (import.meta.env.VITE_ROBOT_URL || "https://xvendas-robot.onrender.com").replace(/\/$/, "");
 
 const stages = [
   ["abordagem", "Abordagem", "Receba o cliente e descubra o motivo da visita."],
@@ -59,6 +61,53 @@ type Stage = typeof stages[number][0];
 type ProductResult = { found: boolean; code: string; text: string; url?: string; title?: string };
 type Workspace = "atendimento" | "produtos" | "credito" | "fechamento" | "treinamento" | "desempenho";
 type HomeTool = "atendimento" | "produto" | "credito" | "treinamento" | "metas" | "historico" | null;
+
+type HomeCard = { id: Exclude<HomeTool, null>; icon: AppIconName; title: string; shortTitle: string; description: string; eyebrow: string; featured?: boolean };
+
+const homeCards: HomeCard[] = [
+  { id: "atendimento", icon: "sale", title: "Novo atendimento", shortTitle: "Atender", eyebrow: "Venda guiada", description: "Conduza a conversa do primeiro contato até o fechamento.", featured: true },
+  { id: "produto", icon: "search", title: "Pesquisar produto", shortTitle: "Produtos", eyebrow: "Consulta rápida", description: "Consulte preço, estoque, voltagem e informações do produto." },
+  { id: "credito", icon: "credit", title: "Simular crediário", shortTitle: "Crédito", eyebrow: "CT1, CT2 e 48", description: "Prepare entrada, parcelas e condições para o cliente." },
+  { id: "historico", icon: "history", title: "Histórico", shortTitle: "Histórico", eyebrow: "Atendimentos", description: "Continue acompanhando as conversas salvas na nuvem." },
+  { id: "treinamento", icon: "training", title: "Treinar vendas", shortTitle: "Treinar", eyebrow: "Desenvolvimento", description: "Pratique abordagens e evolua suas habilidades comerciais." },
+  { id: "metas", icon: "goals", title: "Metas e desempenho", shortTitle: "Metas", eyebrow: "Resultados", description: "Acompanhe evolução, conversão e desempenho de vendas." }
+];
+
+const routeByTool: Record<Exclude<HomeTool, null>, string> = {
+  atendimento: "atendimento", produto: "produtos", credito: "credito", treinamento: "treinamento", metas: "metas", historico: "historico"
+};
+
+function toolFromHash(): HomeTool {
+  const route = window.location.hash.replace(/^#\/?/, "").split("/")[0];
+  return (Object.entries(routeByTool).find(([, value]) => value === route)?.[0] as HomeTool) || null;
+}
+
+function PortalFrame({ active, onNavigate, children }: { active: HomeTool; onNavigate: (tool: HomeTool) => void; children: React.ReactNode }) {
+  const activeCard = homeCards.find(card => card.id === active);
+  return <main className="portalShell">
+    <aside className="portalSidebar">
+      <button className="portalBrand" onClick={() => onNavigate(null)} aria-label="Ir para o início"><span className="brandMark">XV</span><span><strong>XVendas</strong><small>Venda com inteligência</small></span></button>
+      <nav className="portalNav" aria-label="Menu principal">
+        <button className={!active ? "portalNavItem active" : "portalNavItem"} onClick={() => onNavigate(null)}><AppIcon name="home"/><span>Início</span></button>
+        {homeCards.map(card => <button key={card.id} className={active === card.id ? "portalNavItem active" : "portalNavItem"} onClick={() => onNavigate(card.id)}><AppIcon name={card.icon}/><span>{card.shortTitle}</span></button>)}
+      </nav>
+      <div className="portalSidebarTip"><AppIcon name="spark"/><div><strong>Dica rápida</strong><small>Use o atendimento guiado quando estiver falando com o cliente.</small></div></div>
+    </aside>
+    <section className="portalViewport">
+      <header className="portalTopbar">
+        <button className="portalMobileBrand" onClick={() => onNavigate(null)}><span className="brandMark">XV</span><strong>XVendas</strong></button>
+        <div className="portalBreadcrumb"><small>{activeCard ? activeCard.eyebrow : "Painel do vendedor"}</small><strong>{activeCard?.title || "Visão geral"}</strong></div>
+        <LoginPanel />
+      </header>
+      <div className="portalPage">{children}</div>
+      <nav className="portalBottomNav" aria-label="Navegação do aplicativo">
+        <button className={!active ? "active" : ""} onClick={() => onNavigate(null)}><AppIcon name="home"/><span>Início</span></button>
+        {homeCards.slice(0, 3).map(card => <button key={card.id} className={active === card.id ? "active" : ""} onClick={() => onNavigate(card.id)}><AppIcon name={card.icon}/><span>{card.shortTitle}</span></button>)}
+        <button className={active === "historico" ? "active" : ""} onClick={() => onNavigate("historico")}><AppIcon name="history"/><span>Histórico</span></button>
+      </nav>
+    </section>
+  </main>;
+}
 
 const workspaces: Array<{ id: Workspace; label: string; icon: string; description: string }> = [
   { id: "atendimento", label: "Atendimento", icon: "🤝", description: "Cliente, conversa e recomendações" },
@@ -78,7 +127,7 @@ function ToolGroup({ title, description, children, open = false }: { title: stri
 
 function App() {
   const [started, setStarted] = useState(false);
-  const [homeTool, setHomeTool] = useState<HomeTool>(null);
+  const [homeTool, setHomeTool] = useState<HomeTool>(() => toolFromHash());
   const [customer, setCustomer] = useState("");
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
@@ -95,6 +144,24 @@ function App() {
   const [searching, setSearching] = useState(false);
   const [product, setProduct] = useState<ProductResult | null>(null);
   const [searchError, setSearchError] = useState("");
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const route = window.location.hash.replace(/^#\/?/, "").split("/")[0];
+      if (route !== "venda") {
+        setStarted(false);
+        setHomeTool(toolFromHash());
+      }
+    };
+    window.addEventListener("hashchange", syncRoute);
+    return () => window.removeEventListener("hashchange", syncRoute);
+  }, []);
+
+  function navigatePortal(tool: HomeTool) {
+    setHomeTool(tool);
+    const route = tool ? `/${routeByTool[tool]}` : "/";
+    if (window.location.hash !== `#${route}`) window.location.hash = route;
+  }
 
   const currentIndex = stages.findIndex(s => s[0] === stage);
   const current = stages[currentIndex];
@@ -160,50 +227,55 @@ function App() {
   }
 
   if (!started) {
-    const homeCards: Array<{id:Exclude<HomeTool,null>;icon:string;title:string;description:string;accent?:boolean}> = [
-      {id:"atendimento",icon:"🤝",title:"Novo atendimento",description:"Inicie uma venda guiada do começo ao fechamento.",accent:true},
-      {id:"produto",icon:"🔎",title:"Pesquisar produto",description:"Consulte um item rapidamente sem abrir um atendimento."},
-      {id:"credito",icon:"💳",title:"Simular crediário",description:"Calcule condições e parcelas para o cliente."},
-      {id:"treinamento",icon:"🎓",title:"Treinar vendas",description:"Veja seu foco de treinamento e pratique habilidades."},
-      {id:"metas",icon:"📈",title:"Minhas metas",description:"Acompanhe evolução, conversão e desempenho."},
-      {id:"historico",icon:"🕘",title:"Histórico",description:"Consulte os atendimentos salvos na nuvem."}
-    ];
-    return <main className="homeShell">
-      <header className="homeTop">
-        <div className="homeBrand"><span className="brandMark">XV</span><div><strong>XVendas</strong><small>Seu assistente de vendas</small></div></div>
-        <LoginPanel />
-      </header>
-      <section className="homeHero">
-        <div><span className="eyebrow">Painel do vendedor</span><h1>O que você precisa fazer agora?</h1><p>Abra só a ferramenta necessária ou comece um atendimento completo.</p></div>
-        <div className="homeHeroBadge"><span>⚡</span><strong>Venda com foco</strong><small>Menos telas. Mais ação.</small></div>
-      </section>
-      <section className="homeCards" aria-label="Atalhos do XVendas">
-        {homeCards.map(card=><button key={card.id} className={card.accent?"homeCard primaryCard":"homeCard"} onClick={()=>setHomeTool(card.id)}>
-          <span className="homeCardIcon">{card.icon}</span><span><strong>{card.title}</strong><small>{card.description}</small></span><b>→</b>
-        </button>)}
-      </section>
-      {homeTool&&<section className="homeToolPanel">
-        <div className="homeToolHeader"><button className="ghost" onClick={()=>setHomeTool(null)}>← Voltar ao início</button><span>{homeCards.find(c=>c.id===homeTool)?.title}</span></div>
-        {homeTool==="atendimento"&&<div className="homeStart"><div><span className="step">🤝 Novo atendimento</span><h2>Comece entendendo o cliente</h2><p>Preencha somente o necessário. Você poderá completar o restante durante a conversa.</p></div><form onSubmit={e => { e.preventDefault(); setWorkspace("atendimento"); setStage("abordagem"); setStarted(true); }} className="startForm">
-          <label>Nome do cliente <small>(opcional)</small><input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Ex.: Maria" /></label>
-          <label>O que ele procura?<input required value={objective} onChange={e => setObjective(e.target.value)} placeholder="Ex.: fogão para apartamento" /></label>
-          <label>Orçamento aproximado <small>(opcional)</small><input value={budget} onChange={e => setBudget(e.target.value)} inputMode="decimal" placeholder="Ex.: 1800" /></label>
-          <div className="smartStartFields">
-            <label>O que mais pesa na escolha?<select value={priority} onChange={e => setPriority(e.target.value as SalePriority)}><option value="">Descobrir durante a conversa</option><option value="preco">Preço</option><option value="qualidade">Qualidade</option><option value="recursos">Recursos/funções</option><option value="parcela">Valor da parcela</option><option value="durabilidade">Durabilidade</option></select></label>
-            <label>Como pensa em pagar?<select value={payment} onChange={e => setPayment(e.target.value as PaymentPreference)}><option value="">Ainda não perguntei</option><option value="pix">À vista / Pix</option><option value="cartao">Cartão</option><option value="crediario">Crediário / parcelado</option><option value="indefinido">Ainda não sabe</option></select></label>
-            <label>Momento de compra<select value={timing} onChange={e => setTiming(e.target.value as PurchaseTiming)}><option value="">Ainda não sei</option><option value="hoje">Quer comprar hoje</option><option value="pesquisando">Está pesquisando</option><option value="orcamento">Quer só orçamento</option></select></label>
+    if (homeTool) {
+      const activeCard = homeCards.find(card => card.id === homeTool)!;
+      return <PortalFrame active={homeTool} onNavigate={navigatePortal}>
+        <section className={`toolPage toolPage-${homeTool}`}>
+          <header className="toolPageHero">
+            <button className="pageBack" onClick={() => navigatePortal(null)}>← Voltar para o início</button>
+            <div className="toolPageTitle"><span className="toolPageIcon"><AppIcon name={activeCard.icon} size={28}/></span><div><span className="eyebrow">{activeCard.eyebrow}</span><h1>{activeCard.title}</h1><p>{activeCard.description}</p></div></div>
+          </header>
+          <div className="toolPageSurface">
+            {homeTool === "atendimento" && <div className="newSalePage"><aside><span className="step">Atendimento inteligente</span><h2>Entenda primeiro.<br/>Venda melhor.</h2><p>Comece com o que você já sabe. O XVendas orienta as próximas perguntas durante a conversa.</p><div className="saleSteps"><span><b>1</b> Identifique a necessidade</span><span><b>2</b> Compare as melhores opções</span><span><b>3</b> Conduza até o fechamento</span></div></aside><form onSubmit={e => { e.preventDefault(); setWorkspace("atendimento"); setStage("abordagem"); setStarted(true); window.location.hash = "/venda"; }} className="startForm appForm">
+              <div className="formSectionTitle"><strong>Informações iniciais</strong><small>Leva menos de um minuto</small></div>
+              <label>Nome do cliente <small>(opcional)</small><input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Ex.: Maria" /></label>
+              <label>O que ele procura?<input required value={objective} onChange={e => setObjective(e.target.value)} placeholder="Ex.: fogão para apartamento" /></label>
+              <label>Orçamento aproximado <small>(opcional)</small><input value={budget} onChange={e => setBudget(e.target.value)} inputMode="decimal" placeholder="Ex.: 1800" /></label>
+              <div className="smartStartFields">
+                <label>Prioridade<select value={priority} onChange={e => setPriority(e.target.value as SalePriority)}><option value="">Descobrir na conversa</option><option value="preco">Preço</option><option value="qualidade">Qualidade</option><option value="recursos">Recursos/funções</option><option value="parcela">Valor da parcela</option><option value="durabilidade">Durabilidade</option></select></label>
+                <label>Pagamento<select value={payment} onChange={e => setPayment(e.target.value as PaymentPreference)}><option value="">Ainda não perguntei</option><option value="pix">À vista / Pix</option><option value="cartao">Cartão</option><option value="crediario">Crediário / parcelado</option><option value="indefinido">Ainda não sabe</option></select></label>
+                <label>Momento da compra<select value={timing} onChange={e => setTiming(e.target.value as PurchaseTiming)}><option value="">Ainda não sei</option><option value="hoje">Quer comprar hoje</option><option value="pesquisando">Está pesquisando</option><option value="orcamento">Quer só orçamento</option></select></label>
+              </div>
+              <p className="smartStartHint"><AppIcon name="spark" size={16}/> Campos opcionais deixam as sugestões mais personalizadas.</p>
+              <button className="primary appPrimaryAction">Iniciar atendimento <AppIcon name="arrow" size={19}/></button>
+            </form></div>}
+            {homeTool === "produto" && <SecureProductLookup />}
+            {homeTool === "credito" && <CrediarioSimulator />}
+            {homeTool === "treinamento" && <PersonalTrainerPanel notes={[]} objective="" budget="" stage="Início" />}
+            {homeTool === "metas" && <div className="stackedTools"><SellerProgress /><PerformanceDashboard /></div>}
+            {homeTool === "historico" && <SalesHistoryPanel />}
           </div>
-          <p className="smartStartHint">⚡ Esses campos são opcionais. Quando preenchidos, o XVendas adapta perguntas, argumentos e próximos passos.</p>
-          <button className="primary">Iniciar atendimento inteligente →</button>
-        </form></div>}
-        {homeTool==="produto"&&<SecureProductLookup />}
-        {homeTool==="credito"&&<CrediarioSimulator />}
-        {homeTool==="treinamento"&&<PersonalTrainerPanel notes={[]} objective="" budget="" stage="Início" />}
-        {homeTool==="metas"&&<><SellerProgress /><PerformanceDashboard /></>}
-        {homeTool==="historico"&&<SalesHistoryPanel />}
-      </section>}
-      <footer className="homeFooter"><span>XVendas</span><small>Use o atendimento guiado quando estiver com o cliente; use os atalhos para consultas rápidas.</small></footer>
-    </main>;
+        </section>
+      </PortalFrame>;
+    }
+
+    return <PortalFrame active={null} onNavigate={navigatePortal}>
+      <section className="dashboardHero">
+        <div className="dashboardHeroCopy"><span className="eyebrow">Seu assistente de vendas</span><h1>Bom trabalho começa com a ferramenta certa.</h1><p>Escolha o que precisa fazer. Cada função abre em uma tela própria, pronta para usar.</p><button className="heroAction" onClick={() => navigatePortal("atendimento")}><span>Começar atendimento</span><AppIcon name="arrow"/></button></div>
+        <div className="dashboardVisual" aria-hidden="true"><div className="visualGlow"/><div className="visualCard main"><span><AppIcon name="spark"/></span><small>Próxima ação</small><strong>Descubra a prioridade do cliente</strong></div><div className="visualCard product"><AppIcon name="search"/><span><small>Produto</small><strong>Consulta rápida</strong></span></div><div className="visualCard credit"><AppIcon name="credit"/><span><small>Crediário</small><strong>CT1 • CT2 • 48</strong></span></div></div>
+      </section>
+
+      <section className="dashboardSection">
+        <div className="sectionHeading"><div><span>Acesso rápido</span><h2>O que vamos fazer agora?</h2></div><small>Selecione uma função para abrir</small></div>
+        <div className="appCardGrid">
+          {homeCards.map((card, index) => <button key={card.id} className={`appFeatureCard ${card.featured ? "featured" : ""}`} onClick={() => navigatePortal(card.id)} style={{ "--card-order": index } as React.CSSProperties}>
+            <span className="featureIcon"><AppIcon name={card.icon} size={25}/></span><span className="featureText"><small>{card.eyebrow}</small><strong>{card.title}</strong><p>{card.description}</p></span><span className="featureArrow"><AppIcon name="arrow" size={20}/></span>
+          </button>)}
+        </div>
+      </section>
+
+      <section className="dashboardFooterCard"><div className="footerCardIcon"><AppIcon name="spark" size={26}/></div><div><small>Fluxo recomendado</small><strong>Atendimento → Produto → Crédito → Fechamento</strong><p>Use o atendimento completo para manter as informações do cliente organizadas durante toda a venda.</p></div><button onClick={() => navigatePortal("atendimento")}>Abrir atendimento</button></section>
+    </PortalFrame>;
   }
 
   const activeWorkspace = workspaces.find(item => item.id === workspace)!;
@@ -225,7 +297,7 @@ function App() {
         <div><span className="eyebrow">Atendimento em andamento</span><h1>{customer || "Cliente"} <small>• {objective}</small></h1></div>
         <div className="topActions">
           <button className={quickMode ? "quickModeToggle active" : "quickModeToggle"} onClick={() => setQuickMode(value => !value)}>{quickMode ? "☰ Modo completo" : "⚡ Modo rápido"}</button>
-          <button className="ghost" onClick={() => { setStarted(false); setHomeTool(null); setQuickMode(false); }}>Encerrar</button>
+          <button className="ghost" onClick={() => { setStarted(false); setQuickMode(false); navigatePortal(null); }}>Encerrar</button>
         </div>
       </header>
 

@@ -1,5 +1,5 @@
 import React,{useState} from "react";
-const ROBOT_URL="http://localhost:8081";
+const ROBOT_URL=(import.meta.env.VITE_ROBOT_URL||"https://xvendas-robot.onrender.com").replace(/\/$/,"");
 
 export function CreditSimulator({defaultCode=""}:{defaultCode?:string}){
   const [code,setCode]=useState(defaultCode);

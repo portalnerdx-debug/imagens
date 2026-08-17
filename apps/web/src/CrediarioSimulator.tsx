@@ -11,6 +11,10 @@ function entryNumber(value:string){
 
 function friendlyError(e:any){
  const raw=String(e?.message||e||"");
+ if(raw.includes("CLICK_CREDENTIALS_NOT_CONFIGURED"))return "As credenciais da Plataforma Click não estão configuradas no Render.";
+ if(raw.includes("CLICK_INTERACTIVE_CHALLENGE_REQUIRED"))return "A Plataforma Click pediu uma verificação interativa e não permitiu renovar a sessão automaticamente.";
+ if(raw.includes("CLICK_LOGIN_FAILED"))return "O Render tentou renovar a sessão, mas a Plataforma Click não aceitou o login.";
+ if(raw.includes("CLICK_SESSION_EXPIRED"))return "A sessão da Plataforma Click expirou e não pôde ser renovada automaticamente.";
  if(raw.includes("failed-precondition"))return "A integração autorizada com a Plataforma Click ainda não foi configurada no servidor.";
  if(raw.includes("unauthenticated")||raw.includes("Faça login"))return "Faça login no XVendas para consultar o crediário.";
  if(raw.includes("PRODUCT_NOT_FOUND"))return "Produto não encontrado na Plataforma Click.";
@@ -35,6 +39,9 @@ function friendlyError(e:any){
  if(raw.includes("48_PAYMENT_ID_NOT_FOUND"))return "A linha de entrada variável do Cliente Novo 48 não foi identificada.";
  if(raw.includes("48_ENTRY_BELOW_MINIMUM"))return "A entrada informada é menor que o mínimo calculado pela Plataforma Click.";
  if(raw.includes("NEW_CUSTOMER_CART_CLEANUP_FAILED"))return "Não foi possível retirar o produto tradicional 447164 do carrinho Cliente Novo.";
+ if(raw.includes("CART_CLEANUP_FAILED"))return "Não foi possível zerar o carrinho da Plataforma Click. Tente novamente antes de fazer outra simulação.";
+ if(raw.includes("TRADITIONAL_CART_TOTAL_REQUIRED"))return "Não foi possível obter o total do carrinho antes de selecionar a faixa do seguro prestamista.";
+ if(raw.includes("PRESTAMISTA_BAND_SETUP_FAILED"))return "Não foi possível manter somente o produto de seguro correspondente à faixa do total.";
  if(raw.includes("invalid-argument"))return "Revise CPF, parcelas, plano e entrada.";
  return raw&&raw!=="AUTOMATION_FAILED"?raw:"Não foi possível consultar o crediário agora.";
 }
@@ -116,7 +123,7 @@ export function CrediarioSimulator(){
    {result.financedTotal!==undefined&&<div><small>Total parcelado</small><strong>R$ {Number(result.financedTotal).toFixed(2).replace(".",",")}</strong></div>}
    <div><small>Total</small><strong>{result.total!==undefined?`R$ ${Number(result.total).toFixed(2).replace(".",",")}`:"—"}</strong></div>
    {(result.requiredProducts||result.ct1RequiredProducts)?.length>0&&<p>Produtos obrigatórios preparados: {(result.requiredProducts||result.ct1RequiredProducts).map((item:any)=>`${item.code} (${item.quantity}x)`).join(" • ")}</p>}
-   {result.warranty?.message&&<p>{result.warranty.message}{result.warranty.cartTotalAfterWarranty!==undefined?` Total do carrinho nesse momento: R$ ${Number(result.warranty.cartTotalAfterWarranty).toFixed(2).replace(".",",")}.`:""}</p>}
+   {result.warranty?.message&&<p>{result.warranty.message}{result.warranty.cartTotalAfterWarranty!==undefined?` Total usado para escolher a faixa, sem o produto 849xxx: R$ ${Number(result.warranty.cartTotalAfterWarranty).toFixed(2).replace(".",",")}.`:""}</p>}
    {result.message&&<p>{result.message}</p>}
   </div>}
   <div className="creditSafety"><strong>🔒 CPF temporário</strong><span>É enviado à função segura somente para a consulta e não é incluído pelo XVendas no histórico de aprendizado.</span></div>
