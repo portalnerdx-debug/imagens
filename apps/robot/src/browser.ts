@@ -46,11 +46,11 @@ export async function withAuthenticatedClickPage<T>(task:(page:Page)=>Promise<T>
    const page=await context.newPage();
    await page.goto(CLICK_BASE_URL,{waitUntil:"domcontentloaded",timeout:60000});
    return await task(page);
-  }finally{
+ }finally{
    await close();
   }
  },async()=>{
-  console.warn("[robot] Sessão da Plataforma Click expirada; renovando login automaticamente.");
+  console.warn("[robot] Sessão expirada ou carrinho não zerado; criando uma sessão Click nova e repetindo uma vez.");
   await refreshClickSession();
  });
 }

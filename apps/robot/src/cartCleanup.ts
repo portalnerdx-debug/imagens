@@ -99,6 +99,9 @@ export async function clearCreditCart(page:Page){
  const remainingCodes=parseCartProductCodes(html);
  const remainingCount=parseCartItemCount(html);
  if(remainingCodes.length>0||(remainingCount!==undefined&&remainingCount>0)){
+  console.warn("[cart] limpeza não confirmada; será solicitada uma sessão nova",{
+   remainingCount,remainingCodes
+  });
   throw new Error("CART_CLEANUP_FAILED");
  }
 
