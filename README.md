@@ -20,6 +20,8 @@ Incluído:
 
 Leia `docs/BACKEND_PLAYWRIGHT.md`.
 
+Para executar o robô gratuitamente fora do computador, use o Blueprint `render.yaml` e siga `docs/ETAPA_8_13_RENDER_GRATUITO.md`.
+
 O plano Cliente Novo usa o código de pagamento `48` e permite de 2 a 24 pagamentos totais: 1 entrada variável e até 23 parcelas financiadas. O fluxo detalhado está em `docs/ETAPA_8_11_CREDIARIO_CLIENTE_NOVO_48.md`.
 
 ### Diagnóstico do robô no Windows

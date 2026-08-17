@@ -1,5 +1,12 @@
 # Changelog
 
+## Etapa 8.13 — publicação gratuita no Render
+- Adicionado `render.yaml` para criar automaticamente o serviço Docker gratuito.
+- Credenciais da Plataforma Click são solicitadas como segredos e não ficam no repositório.
+- Configurados CORS do Firebase, health check `/health` e implantação automática por commit.
+- O contêiner usa instalação reproduzível e Chromium ajustado para o `/dev/shm` limitado.
+- Incluído guia completo para conectar a URL HTTPS do Render ao frontend Firebase.
+
 ## Etapa 8.12 — retirada do 447164 no Cliente Novo 48
 - O robô remove explicitamente o código tradicional `447164` antes de preparar o carrinho Cliente Novo.
 - O plano 48 mantém somente `447157`, `801911` (3 unidades) e o seguro condicional `849081`.

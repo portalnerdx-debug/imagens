@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: xvendas-robot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/robot/Dockerfile
+    dockerContext: ./apps/robot
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: CLICK_BASE_URL
+        value: https://plataformaclick.com.br
+      - key: CLICK_HEADLESS
+        value: "true"
+      - key: FIREBASE_PROJECT_ID
+        value: vendas-211b4
+      - key: ALLOWED_ORIGIN
+        value: https://vendas-211b4.web.app,https://vendas-211b4.firebaseapp.com
+      - key: CLICK_USERNAME
+        sync: false
+      - key: CLICK_PASSWORD
+        sync: false
