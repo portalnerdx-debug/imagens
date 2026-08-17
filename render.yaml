@@ -16,7 +16,7 @@ services:
         value: vendas-211b4
       - key: ALLOWED_ORIGIN
         value: https://vendas-211b4.web.app,https://vendas-211b4.firebaseapp.com
-      - key: CLICK_USERNAME
+      - key: JPDJSANTOS
         sync: false
-      - key: CLICK_PASSWORD
+      - key: Dti@dti4
         sync: false
