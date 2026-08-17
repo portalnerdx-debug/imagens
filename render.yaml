@@ -7,6 +7,7 @@ services:
     dockerContext: ./apps/robot
     healthCheckPath: /health
     autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 30
     envVars:
       - key: CLICK_BASE_URL
         value: https://plataformaclick.com.br
@@ -16,7 +17,7 @@ services:
         value: vendas-211b4
       - key: ALLOWED_ORIGIN
         value: https://vendas-211b4.web.app,https://vendas-211b4.firebaseapp.com
-      - key: JPDJSANTOS
+      - key: CLICK_USERNAME
         sync: false
-      - key: Dti@dti4
+      - key: CLICK_PASSWORD
         sync: false
