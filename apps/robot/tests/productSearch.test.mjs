@@ -165,6 +165,18 @@ test("confirma carrinho vazio quando o contador chega a zero",()=>{
  assert.deepEqual(parseCartProductCodes('<span id="CarrinhoNumItens">0</span>'),[]);
 });
 
+test("captura o data-item do botão real de exclusão do carrinho",()=>{
+ const html=`
+  <span id="CarrinhoNumItens">2</span>
+  <td class="col-excluir">
+   <a href="javascript:;" data-item="412100" class="link-excluir ft24 ft700">×</a>
+  </td>
+  <a class="link-excluir" data-item="801911" href="javascript:;">×</a>
+  <span data-item="12192523">id de pagamento que não é produto</span>
+ `;
+ assert.deepEqual(parseCartProductCodes(html).sort(),["412100","801911"]);
+});
+
 test("captura data-cdpagamento da primeira entrada sem aguardar locator",()=>{
  const html=`
   <form name="pagamentos_ent" id="pagamentos_ent">
