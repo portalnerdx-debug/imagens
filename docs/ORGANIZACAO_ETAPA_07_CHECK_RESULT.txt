@@ -1,0 +1,9 @@
+ETAPA 7 — CHECK RESULT
+- Arquivos alterados revisados estaticamente: OK
+- Marcadores de conflito Git: nenhum
+- Delimitadores básicos dos arquivos alterados: balanceados
+- Integração de leitura: POST /busca -> detalhe do produto -> captura
+- Fallback visual Playwright: mantido
+- Autenticação do front-end para o robô: corrigida via ClickGateway
+- npm/typecheck completo: NÃO CONCLUÍDO neste ambiente; npm ci deixou dependências parciais e foi removido antes do ZIP.
+- O pacote final não contém node_modules.

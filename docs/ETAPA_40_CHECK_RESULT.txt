@@ -1,0 +1,20 @@
+Pré-deploy estrutural: OK
+
+Auditoria de fonte: 0 erro(s), 0 aviso(s).
+
+
+XVendas — E2E Readiness
+
+OK apps/web/src/AuthContext.tsx
+OK apps/web/src/LiveProductContext.tsx
+ERRO apps/web/src/CrediarioSimulator.tsx
+OK apps/web/src/SmartClosePanel.tsx
+OK apps/web/src/SalesIntelligencePanel.tsx
+OK apps/web/src/ComparisonShare.tsx
+OK firestore.rules
+OK firebase.json
+OK componente montado: SmartClosePanel
+OK componente montado: SalesIntelligencePanel
+OK componente montado: ComparisonShare
+
+1 falha(s) estrutural(is).

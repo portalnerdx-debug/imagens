@@ -1,0 +1,4 @@
+OK AuthProvider importado
+OK LiveProductProvider importado
+OK App dentro de AuthProvider
+OK App dentro de LiveProductProvider

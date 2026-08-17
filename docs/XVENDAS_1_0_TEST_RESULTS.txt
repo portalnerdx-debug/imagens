@@ -1,0 +1,114 @@
+CLICK TESTS
+TAP version 13
+# Subtest: mock API retorna produto
+ok 1 - mock API retorna produto
+  ---
+  duration_ms: 25.973762
+  type: 'test'
+  ...
+# Subtest: mock API simula 401
+ok 2 - mock API simula 401
+  ---
+  duration_ms: 6.513491
+  type: 'test'
+  ...
+# Subtest: mock API simula 429
+ok 3 - mock API simula 429
+  ---
+  duration_ms: 3.603391
+  type: 'test'
+  ...
+# Subtest: normaliza produto em português
+ok 4 - normaliza produto em português
+  ---
+  duration_ms: 1.574697
+  type: 'test'
+  ...
+# Subtest: normaliza crediário
+ok 5 - normaliza crediário
+  ---
+  duration_ms: 0.262624
+  type: 'test'
+  ...
+# Subtest: rejeita resposta financeira incompleta
+ok 6 - rejeita resposta financeira incompleta
+  ---
+  duration_ms: 0.47805
+  type: 'test'
+  ...
+# Subtest: código de produto
+ok 7 - código de produto
+  ---
+  duration_ms: 0.608203
+  type: 'test'
+  ...
+# Subtest: CPF somente 11 dígitos
+ok 8 - CPF somente 11 dígitos
+  ---
+  duration_ms: 0.146715
+  type: 'test'
+  ...
+# Subtest: CT1 não exige entrada
+ok 9 - CT1 não exige entrada
+  ---
+  duration_ms: 0.102009
+  type: 'test'
+  ...
+# Subtest: CT2 exige entrada
+ok 10 - CT2 exige entrada
+  ---
+  duration_ms: 0.077474
+  type: 'test'
+  ...
+# Subtest: parcelas de 1 a 48
+ok 11 - parcelas de 1 a 48
+  ---
+  duration_ms: 1.817671
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 111.734706
+
+PREDEPLOY
+Pré-deploy estrutural: OK
+
+AUDIT
+Auditoria de fonte: 0 erro(s), 0 aviso(s).
+
+E2E
+
+XVendas — E2E Readiness
+
+OK apps/web/src/AuthContext.tsx
+OK apps/web/src/LiveProductContext.tsx
+OK apps/web/src/CrediarioSimulator.tsx
+OK apps/web/src/SmartClosePanel.tsx
+OK apps/web/src/SalesIntelligencePanel.tsx
+OK apps/web/src/ComparisonShare.tsx
+OK firestore.rules
+OK firebase.json
+OK componente montado: SmartClosePanel
+OK componente montado: SalesIntelligencePanel
+OK componente montado: ComparisonShare
+
+Estrutura dos fluxos críticos encontrada.
+
+FINAL GATE
+OK VERSION
+OK firebase.json
+OK firestore.rules
+OK firestore.indexes.json
+OK apps/web/src/CrediarioSimulator.tsx
+OK apps/web/src/SecureProductLookup.tsx
+OK apps/web/src/SmartClosePanel.tsx
+OK functions/src/clickAdapter.ts
+OK docs/ETAPA_47_PROTOCOLO_HOMOLOGACAO_REAL.md
+
+Gate final estrutural XVendas 1.0.0: OK

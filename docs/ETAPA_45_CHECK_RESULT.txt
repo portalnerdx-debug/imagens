@@ -1,0 +1,5 @@
+Pré-deploy estrutural: OK
+
+Auditoria de fonte: 0 erro(s), 0 aviso(s).
+
+Configuração segura do adapter Click: OK

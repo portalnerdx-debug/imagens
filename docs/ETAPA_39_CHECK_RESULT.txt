@@ -1,0 +1,15 @@
+Pré-deploy estrutural: OK
+
+Auditoria de fonte: 0 erro(s), 0 aviso(s).
+
+
+XVendas — Status de Release
+
+⬜ Dependências instaladas
+⬜ Firebase ENV criado
+✅ Projeto Firebase selecionado
+✅ Configuração Hosting
+✅ Regras Firestore
+✅ Índices Firestore
+
+2 item(ns) ainda precisam ser preparados neste computador.

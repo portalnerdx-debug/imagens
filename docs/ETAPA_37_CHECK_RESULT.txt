@@ -1,0 +1,7 @@
+$ node scripts/predeploy-check.mjs
+Pré-deploy estrutural: OK
+
+$ node scripts/audit-source.mjs
+Auditoria de fonte: 0 erro(s), 0 aviso(s).
+
+Validação do .env, typecheck, build e deploy dependem das configurações/dependências do ambiente de homologação.

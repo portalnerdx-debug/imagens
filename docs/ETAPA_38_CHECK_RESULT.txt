@@ -1,0 +1,3 @@
+Pré-deploy estrutural: OK
+
+Auditoria de fonte: 0 erro(s), 0 aviso(s).

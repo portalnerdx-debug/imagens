@@ -1,0 +1,6 @@
+OK apps/robot/src/server.ts
+OK apps/robot/src/loginAuto.ts
+OK apps/robot/src/creditSimulation.ts
+OK apps/robot/src/firebaseAuth.ts
+OK apps/robot/Dockerfile
+OK apps/web/src/ClickGateway.ts

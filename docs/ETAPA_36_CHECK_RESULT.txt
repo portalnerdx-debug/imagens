@@ -1,0 +1,7 @@
+$ npm run predeploy:check
+Pré-deploy estrutural: OK
+
+$ npm run audit:source
+Auditoria de fonte: 0 erro(s), 0 aviso(s).
+
+Observação: npm install excedeu o tempo do ambiente; typecheck/build completos devem ser executados após instalar dependências.
