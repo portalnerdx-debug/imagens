@@ -6,9 +6,15 @@ import {
   productNameFromText
 } from "../src/productSearch.ts";
 import {extractCreditResult,formatBrazilianMoney,parseCt2MinimumEntry} from "../src/creditResultParser.ts";
-import {ct1RequiredItems,requiredItemsForPlan} from "../src/ct1CartRules.ts";
+import {
+ baseRequiredItemsForPlan,ct1RequiredItems,PRESTAMISTA_CODES,
+ prestamistaItemForTotal,requiredItemsForPlan
+} from "../src/ct1CartRules.ts";
 import {chooseWarrantyHref} from "../src/warrantySelection.ts";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "../src/warrantyService.ts";
+import {parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
+import {parsePaymentEntryId} from "../src/paymentEntryId.ts";
+import {runWithSessionRetry} from "../src/sessionRetry.ts";
 
 const capturedProductText = `
 Espremedor de Frutas Mondial 1,2L 30W Premium E-02 Preto 110V COD.: 412100
@@ -53,33 +59,42 @@ test("interpreta o resultado CT1 real devolvido pela tela de pagamento", () => {
   assert.equal(result.total,5928.60);
 });
 
-test("prepara os produtos obrigatórios do CT1 até R$ 2.500",()=>{
- assert.deepEqual(ct1RequiredItems(2500).map(({code,quantity})=>({code,quantity})),[
+test("prepara a base tradicional antes de escolher a faixa prestamista",()=>{
+ assert.deepEqual(baseRequiredItemsForPlan("CT1").map(({code,quantity})=>({code,quantity})),[
   {code:"447164",quantity:1},
   {code:"801911",quantity:3}
  ]);
 });
 
-test("adiciona o seguro prestamista quando o produto passa de R$ 2.500",()=>{
- assert.deepEqual(ct1RequiredItems(2500.01).map(({code,quantity})=>({code,quantity})),[
-  {code:"447164",quantity:1},
-  {code:"801911",quantity:3},
-  {code:"849081",quantity:1}
- ]);
+test("seleciona a faixa prestamista pelos limites exatos do total sem 849xxx",()=>{
+ const cases=[
+  [0,"849043"],[1000,"849043"],[1000.01,"849050"],[1500,"849050"],
+  [1500.01,"849067"],[2000,"849067"],[2000.01,"849074"],[2500,"849074"],
+  [2500.01,"849081"],[9000,"849081"]
+ ];
+ for(const [total,expected] of cases){
+  assert.equal(prestamistaItemForTotal(total).code,expected,`total ${total}`);
+ }
 });
 
-test("prepara os produtos do Cliente Novo 48 conforme o HAR",()=>{
+test("prepara os produtos do Cliente Novo 48 com exatamente uma faixa",()=>{
  const items=requiredItemsForPlan("48",2500);
  assert.equal(items.some(item=>item.code==="447164"),false);
- assert.deepEqual(items.map(({code,quantity,unitPrice})=>({code,quantity,unitPrice})),[
-  {code:"447157",quantity:1,unitPrice:29.90},
-  {code:"801911",quantity:3,unitPrice:59.90}
+ assert.deepEqual(items.map(({code,quantity})=>({code,quantity})),[
+  {code:"447157",quantity:1},{code:"801911",quantity:3},{code:"849074",quantity:1}
  ]);
- assert.deepEqual(requiredItemsForPlan("48",2500.01).map(({code,quantity})=>({code,quantity})),[
-  {code:"447157",quantity:1},
-  {code:"801911",quantity:3},
-  {code:"849081",quantity:1}
+ for(const total of [800,1200,1700,2200,2700]){
+  const selected=requiredItemsForPlan("48",total).filter(item=>PRESTAMISTA_CODES.includes(item.code));
+  assert.equal(selected.length,1,`total ${total} deve possuir uma única faixa`);
+ }
+});
+
+test("CT1 também inclui sempre uma única faixa prestamista",()=>{
+ const items=ct1RequiredItems(1000.01);
+ assert.deepEqual(items.map(({code,quantity})=>({code,quantity})),[
+  {code:"447164",quantity:1},{code:"801911",quantity:3},{code:"849050",quantity:1}
  ]);
+ assert.equal(items.filter(item=>PRESTAMISTA_CODES.includes(item.code)).length,1);
 });
 
 test("seleciona o link real da garantia adicional",()=>{
@@ -131,4 +146,63 @@ test("interpreta Cliente Novo 48 com entrada variável conforme o HAR",()=>{
  assert.equal(result.installmentValue,549.82);
  assert.equal(result.financedTotal,5498.21);
  assert.equal(result.total,5998.21);
+});
+
+test("identifica todos os produtos que precisam ser removidos do carrinho",()=>{
+ const html=`
+  <span id="CarrinhoNumItens">6</span>
+  <a href="/checkout_catalogo/carrinho.php?cod=1032123&amp;acao=excluir">Excluir</a>
+  <a href="/checkout_catalogo/carrinho.php?acao=excluir&amp;cod=801911">Excluir</a>
+  <div data-cod="447164">Cód.: 447164</div>
+  <button onclick="removerProduto('849081')">Remover</button>
+ `;
+ assert.equal(parseCartItemCount(html),6);
+ assert.deepEqual(parseCartProductCodes(html).sort(),["1032123","447164","801911","849081"].sort());
+});
+
+test("confirma carrinho vazio quando o contador chega a zero",()=>{
+ assert.equal(parseCartItemCount('<span id="CarrinhoNumItens">0</span>'),0);
+ assert.deepEqual(parseCartProductCodes('<span id="CarrinhoNumItens">0</span>'),[]);
+});
+
+test("captura data-cdpagamento da primeira entrada sem aguardar locator",()=>{
+ const html=`
+  <form name="pagamentos_ent" id="pagamentos_ent">
+   <div><span data-item="1">Entrada</span></div>
+   <div><select class="change-payment" data-item="1" data-cdpagamento="12192490"></select></div>
+   <a class="remove-payment" data-item="12192490">Excluir</a>
+   <select class="change-payment" data-cdpagamento="12192491"></select>
+  </form>`;
+ assert.equal(parsePaymentEntryId(html),"12192490");
+});
+
+test("usa data-item longo como alternativa e ignora o código curto da condição",()=>{
+ const html=`
+  <form id="pagamentos_ent">
+   <span data-item="1">Código da condição</span>
+   <a class="remove-payment" data-item="12192523">Excluir entrada</a>
+  </form>`;
+ assert.equal(parsePaymentEntryId(html),"12192523");
+ assert.equal(parsePaymentEntryId('<form id="pagamentos_ent"><span data-item="1"></span></form>'),undefined);
+});
+
+test("renova a sessão expirada e repete a operação somente uma vez",async()=>{
+ let attempts=0,refreshes=0;
+ const result=await runWithSessionRetry(async()=>{
+  attempts++;
+  if(attempts===1)throw new Error("CLICK_SESSION_EXPIRED");
+  return "ok";
+ },async()=>{refreshes++});
+ assert.equal(result,"ok");
+ assert.equal(attempts,2);
+ assert.equal(refreshes,1);
+});
+
+test("não renova a sessão para erros que não sejam de expiração",async()=>{
+ let refreshes=0;
+ await assert.rejects(
+  runWithSessionRetry(async()=>{throw new Error("PRODUCT_NOT_FOUND")},async()=>{refreshes++}),
+  /PRODUCT_NOT_FOUND/
+ );
+ assert.equal(refreshes,0);
 });
