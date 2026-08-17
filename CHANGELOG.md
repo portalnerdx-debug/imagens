@@ -1,5 +1,12 @@
 # Changelog
 
+## Etapa 8.23 — login e limpeza resilientes no Render
+- O login automático agora aguarda até 20 segundos pela conclusão, contempla campos em iframe e reconhece mais nomes de usuário e botões de envio.
+- Uma página sem formulário e sem sinal de autenticação não é mais gravada como se fosse uma sessão válida.
+- Se a exclusão AJAX responder com sucesso sem remover o item, o robô abre o carrinho e aciona o botão real `.link-excluir` como segunda estratégia.
+- O carrinho só é considerado vazio com contador zero ou mensagem explícita de vazio; contador ausente deixou de produzir confirmação falsa.
+- A leitura de `CarrinhoNumItens` aceita números dentro de tags internas e atributos de contagem.
+
 ## Etapa 8.22 — pagamento resetado antes do carrinho
 - A condição de pagamento e a entrada da consulta anterior são resetadas antes de qualquer exclusão de produto.
 - Depois do reset, os produtos antigos são removidos pela rota AJAX real e o contador precisa chegar a zero.
