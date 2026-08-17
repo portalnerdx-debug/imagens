@@ -1,4 +1,4 @@
-import type {Dialog,Page} from "playwright";
+import type {Page} from "playwright";
 
 function decodeHtml(value:string){
  return value.replace(/&amp;/gi,"&").replace(/&#0*38;/gi,"&");
@@ -53,44 +53,10 @@ export function parseCartProductCodes(html:string):string[]{
 }
 
 export function parseCartItemCount(html:string):number|undefined{
- const source=String(html||"");
- const element=source.match(/<([a-z][\w:-]*)\b[^>]*\bid=["']CarrinhoNumItens["'][^>]*>([\s\S]{0,160}?)<\/\1>/i);
- const innerValue=element?.[2].replace(/<[^>]+>/g," ").match(/\d+/)?.[0];
- const attributeValue=source.match(/\bid=["']CarrinhoNumItens["'][^>]*\b(?:value|data-(?:count|quantidade|itens))=["'](\d+)["']/i)?.[1];
- const value=Number(innerValue??attributeValue);
- return (innerValue!==undefined||attributeValue!==undefined)&&Number.isFinite(value)?value:undefined;
-}
-
-export function isCartConfirmedEmpty(html:string){
- const count=parseCartItemCount(html);
- if(count!==undefined)return count===0;
- if(parseCartProductCodes(html).length>0)return false;
- const text=String(html||"")
-  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
-  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ")
-  .replace(/<[^>]+>/g," ")
-  .replace(/&nbsp;/gi," ");
- return /carrinho\s+(?:est[aá]\s+)?vazio|nenhum\s+(?:produto|item)|n[aã]o\s+(?:h[aá]|existem?)\s+(?:produto|item)/i.test(text);
-}
-
-function looksLikeLoginPage(html:string){
- return /<input\b[^>]*type=["']password["']/i.test(String(html||""));
-}
-
-async function removeThroughVisibleCart(page:Page,cartUrl:string,codes:string[]){
- await page.goto(cartUrl,{waitUntil:"domcontentloaded",timeout:60000});
- const acceptDialog=(dialog:Dialog)=>{void dialog.accept().catch(()=>{})};
- page.on("dialog",acceptDialog);
- try{
-  for(const code of codes){
-   const button=page.locator(`.link-excluir[data-item="${code}"], [data-item="${code}"][class*="excluir" i]`).first();
-   if(!await button.isVisible({timeout:1200}).catch(()=>false))continue;
-   await button.click({timeout:5000}).catch(()=>{});
-   await page.waitForTimeout(700);
-  }
- }finally{
-  page.off("dialog",acceptDialog);
- }
+ const match=String(html||"").match(/id=["']CarrinhoNumItens["'][^>]*>\s*(\d+)/i);
+ if(!match)return undefined;
+ const value=Number(match[1]);
+ return Number.isFinite(value)?value:undefined;
 }
 
 /** Limpa a sessão do carrinho antes de iniciar uma nova simulação. */
@@ -112,7 +78,6 @@ export async function clearCreditCart(page:Page){
  let current=await page.request.get(cartUrl,{headers,timeout:60000});
  if(!current.ok())throw new Error("CART_CLEANUP_FAILED");
  let html=await current.text();
- if(looksLikeLoginPage(html))throw new Error("CLICK_SESSION_EXPIRED");
  const removedProducts=new Set<string>();
 
  // Cada exclusão pode devolver uma nova versão do carrinho. Recarregamos e
@@ -121,7 +86,7 @@ export async function clearCreditCart(page:Page){
   const codes=parseCartProductCodes(html);
   const count=parseCartItemCount(html);
   if(codes.length===0){
-   if(isCartConfirmedEmpty(html))break;
+   if(count===undefined||count===0)break;
    throw new Error("CART_CLEANUP_FAILED");
   }
 
@@ -133,32 +98,16 @@ export async function clearCreditCart(page:Page){
    });
    if(!removed.ok())throw new Error("CART_CLEANUP_FAILED");
    removedProducts.add(code);
-   await page.waitForTimeout(250);
   }
 
-  await page.waitForTimeout(500);
   current=await page.request.get(cartUrl,{headers,timeout:60000});
   if(!current.ok())throw new Error("CART_CLEANUP_FAILED");
   html=await current.text();
-  if(looksLikeLoginPage(html))throw new Error("CLICK_SESSION_EXPIRED");
-
-  // Algumas sessões retornam 200 na rota AJAX sem efetivar a exclusão.
-  // Nessa situação repetimos pelo próprio botão da tela, preservando todos os
-  // eventos e parâmetros JavaScript usados pela versão atual da Click.
-  const codesAfterAjax=parseCartProductCodes(html);
-  if(codesAfterAjax.length>0){
-   await removeThroughVisibleCart(page,cartUrl,codesAfterAjax);
-   await page.waitForTimeout(500);
-   current=await page.request.get(cartUrl,{headers,timeout:60000});
-   if(!current.ok())throw new Error("CART_CLEANUP_FAILED");
-   html=await current.text();
-   if(looksLikeLoginPage(html))throw new Error("CLICK_SESSION_EXPIRED");
-  }
  }
 
  const remainingCodes=parseCartProductCodes(html);
  const remainingCount=parseCartItemCount(html);
- if(!isCartConfirmedEmpty(html)){
+ if(remainingCodes.length>0||(remainingCount!==undefined&&remainingCount>0)){
   console.warn("[cart] limpeza não confirmada; será solicitada uma sessão nova",{
    remainingCount,remainingCodes
   });
