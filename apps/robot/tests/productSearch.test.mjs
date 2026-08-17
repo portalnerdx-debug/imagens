@@ -12,7 +12,7 @@ import {
 } from "../src/ct1CartRules.ts";
 import {chooseWarrantyHref} from "../src/warrantySelection.ts";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "../src/warrantyService.ts";
-import {parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
+import {clearCreditCart,parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
 import {parsePaymentEntryId} from "../src/paymentEntryId.ts";
 import {runWithSessionRetry} from "../src/sessionRetry.ts";
 
@@ -175,6 +175,33 @@ test("captura o data-item do botão real de exclusão do carrinho",()=>{
   <span data-item="12192523">id de pagamento que não é produto</span>
  `;
  assert.deepEqual(parseCartProductCodes(html).sort(),["412100","801911"]);
+});
+
+test("reseta o pagamento antes de excluir os produtos antigos",async()=>{
+ const calls=[];
+ let cartReads=0;
+ const response=(body="")=>({ok:()=>true,text:async()=>body});
+ const page={
+  url:()=>"https://plataformaclick.com.br/",
+  request:{get:async(url)=>{
+   calls.push(url);
+   if(url.includes("processa_reseta_pagtos.php"))return response();
+   if(url.includes("carrinho_excluir_ajax.php"))return response('{"vl_total":"0,00"}');
+   if(url.endsWith("/checkout_catalogo/carrinho.php")){
+    cartReads++;
+    return cartReads===1
+     ? response('<span id="CarrinhoNumItens">1</span><a class="link-excluir" data-item="412100">×</a>')
+     : response('<span id="CarrinhoNumItens">0</span>');
+   }
+   throw new Error(`URL inesperada: ${url}`);
+  }}
+ };
+ const result=await clearCreditCart(page);
+ assert.match(calls[0],/processa_reseta_pagtos\.php/);
+ assert.match(calls[1],/checkout_catalogo\/carrinho\.php$/);
+ assert.match(calls[2],/carrinho_excluir_ajax\.php$/);
+ assert.equal(result.confirmedEmpty,true);
+ assert.deepEqual(result.removedProducts,["412100"]);
 });
 
 test("captura data-cdpagamento da primeira entrada sem aguardar locator",()=>{
