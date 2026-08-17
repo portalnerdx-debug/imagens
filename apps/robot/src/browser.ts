@@ -1,10 +1,19 @@
 import fs from "node:fs";
-import {chromium} from "playwright";
-import {AUTH_FILE,CLICK_CHROMIUM_ARGS,CLICK_HEADLESS} from "./config.js";
+import {chromium,type Page} from "playwright";
+import {AUTH_FILE,CLICK_BASE_URL,CLICK_CHROMIUM_ARGS,CLICK_HEADLESS} from "./config.js";
 import {createFreshAuthenticatedState} from "./loginAuto.js";
+import {runWithSessionRetry} from "./sessionRetry.js";
+
+let refreshInProgress:Promise<void>|null=null;
+
+export async function refreshClickSession(){
+ if(refreshInProgress)return refreshInProgress;
+ refreshInProgress=createFreshAuthenticatedState().finally(()=>{refreshInProgress=null});
+ return refreshInProgress;
+}
 
 async function ensureState(){
- if(!fs.existsSync(AUTH_FILE))await createFreshAuthenticatedState();
+ if(!fs.existsSync(AUTH_FILE))await refreshClickSession();
 }
 
 export async function createClickContext(){
@@ -30,7 +39,18 @@ export async function createClickContext(){
   };
 }
 
-export async function refreshClickSession(){
- if(fs.existsSync(AUTH_FILE))fs.rmSync(AUTH_FILE,{force:true});
- await createFreshAuthenticatedState();
+export async function withAuthenticatedClickPage<T>(task:(page:Page)=>Promise<T>){
+ return runWithSessionRetry(async()=>{
+  const {context,close}=await createClickContext();
+  try{
+   const page=await context.newPage();
+   await page.goto(CLICK_BASE_URL,{waitUntil:"domcontentloaded",timeout:60000});
+   return await task(page);
+  }finally{
+   await close();
+  }
+ },async()=>{
+  console.warn("[robot] Sessão da Plataforma Click expirada; renovando login automaticamente.");
+  await refreshClickSession();
+ });
 }
