@@ -1,5 +1,48 @@
 # Changelog
 
+## Etapa 8.22 — pagamento resetado antes do carrinho
+- A condição de pagamento e a entrada da consulta anterior são resetadas antes de qualquer exclusão de produto.
+- Depois do reset, os produtos antigos são removidos pela rota AJAX real e o contador precisa chegar a zero.
+- Somente após essa confirmação o produto atual e os auxiliares da nova simulação são adicionados.
+- Se a Plataforma Click ainda mantiver itens, continua valendo a recuperação por sessão nova da etapa 8.21.
+
+## Etapa 8.21 — sessão nova quando o carrinho fica preso
+- A limpeza AJAX continua sendo a primeira tentativa, por ser mais rápida.
+- Se o carrinho não confirmar zero itens, o robô descarta a tentativa e cria uma sessão autenticada nova.
+- A simulação completa é repetida somente uma vez na sessão nova.
+- O Render registra a quantidade e os códigos restantes para facilitar o diagnóstico sem expor credenciais.
+
+## Etapa 8.20 — exclusão AJAX real do carrinho
+- A limpeza reconhece o código em `data-item` nos botões `.link-excluir` usados atualmente pela Plataforma Click.
+- Cada produto é removido por `carrinho_excluir_ajax.php`, reproduzindo o clique no X da linha.
+- O carrinho é recarregado e precisa confirmar zero itens antes de a nova simulação continuar.
+- O reset da condição de pagamento recebe parâmetros anticache para não reaproveitar o estado anterior.
+
+## Etapa 8.19 — renovação automática da sessão Click
+- Ao receber `CLICK_SESSION_EXPIRED`, o Render refaz o login automaticamente e repete a operação uma vez.
+- Consultas simultâneas compartilham a mesma renovação para não realizar vários logins ao mesmo tempo.
+- O novo arquivo de cookies substitui o antigo somente depois de estar completamente salvo.
+- Credenciais ausentes, login recusado e desafio interativo agora possuem mensagens específicas no site.
+
+## Etapa 8.18 — captura resiliente da entrada variável
+- Removida a espera de 30 segundos em um `data-cdpagamento` inexistente.
+- O robô tenta `data-cdpagamento` e os formatos alternativos de `data-item` dentro de `pagamentos_ent`.
+- Valores curtos da condição, como `data-item="1"`, não são confundidos com o id dinâmico do pagamento.
+- Se a entrada ainda não estiver disponível, a página é recarregada uma vez antes do erro específico do plano.
+- O diagnóstico do Render agora informa se havia formulário, entrada variável ou aviso de faixa prestamista.
+
+## Etapa 8.17 — produto prestamista por faixa do total
+- A regra vale igualmente para CT1, CT2 e Cliente Novo 48.
+- O total é lido depois dos produtos base e da garantia, antes de qualquer código `849xxx`.
+- Até R$ 1.000,00 usa `849043`; de R$ 1.000,01 a R$ 1.500,00 usa `849050`.
+- De R$ 1.500,01 a R$ 2.000,00 usa `849067`; de R$ 2.000,01 a R$ 2.500,00 usa `849074`.
+- Acima de R$ 2.500,00 usa `849081`.
+- Todos os códigos da família são removidos antes da inclusão, garantindo exatamente uma faixa no carrinho.
+
+## Etapa 8.16 — carrinho zerado em toda simulação
+- Todos os itens e a condição de pagamento anterior são removidos antes de CT1, CT2 ou Cliente Novo 48.
+- A consulta só continua depois que o carrinho confirma zero itens.
+
 ## Etapa 8.13 — publicação gratuita no Render
 - Adicionado `render.yaml` para criar automaticamente o serviço Docker gratuito.
 - Credenciais da Plataforma Click são solicitadas como segredos e não ficam no repositório.

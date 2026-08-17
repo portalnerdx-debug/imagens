@@ -8,7 +8,8 @@ Incluído:
 - pesquisa por código;
 - fluxo de crediário 48 / CT1 / CT2;
 - entrada variável no Cliente Novo 48 e no CT2;
-- carrinho Cliente Novo com `447157` (1x), `801911` (3x) e `849081` acima de R$ 2.500,00;
+- carrinho sempre zerado antes de cada simulação;
+- produto prestamista exclusivo por faixa do total sem `849xxx`: `849043`, `849050`, `849067`, `849074` ou `849081`;
 - voltagem somente quando solicitada;
 - sem garantia por padrão;
 - CPF opcional no backend;
