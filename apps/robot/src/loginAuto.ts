@@ -50,15 +50,21 @@ export async function performAutomaticLogin(page:Page){
 
 export async function createFreshAuthenticatedState(){
  fs.mkdirSync(AUTH_DIR,{recursive:true});
+ const temporaryAuthFile=`${AUTH_FILE}.${process.pid}.${Date.now()}.tmp`;
  const browser=await chromium.launch({headless:CLICK_HEADLESS,args:CLICK_CHROMIUM_ARGS});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
  try{
   const page=await context.newPage();
   await page.goto(CLICK_BASE_URL,{waitUntil:"domcontentloaded",timeout:60000});
   await performAutomaticLogin(page);
-  await context.storageState({path:AUTH_FILE});
+  const passwordStillVisible=await page.locator('input[type="password"]').first()
+   .isVisible({timeout:700}).catch(()=>false);
+  if(passwordStillVisible)throw new Error("CLICK_LOGIN_FAILED");
+  await context.storageState({path:temporaryAuthFile});
+  fs.renameSync(temporaryAuthFile,AUTH_FILE);
  }finally{
   await browser.close();
+  if(fs.existsSync(temporaryAuthFile))fs.rmSync(temporaryAuthFile,{force:true});
  }
 }
 

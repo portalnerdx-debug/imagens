@@ -1,8 +1,9 @@
-export type Ct1RequiredItem={code:string;quantity:number;unitPrice:number;reason:string};
+export type CreditPlan="48"|"CT1"|"CT2";
+export type Ct1RequiredItem={code:string;quantity:number;unitPrice?:number;reason:string};
 
 const TRADITIONAL_REQUIRED:Ct1RequiredItem[]=[
  {code:"447164",quantity:1,unitPrice:24.90,reason:"AF Cliente Tradicional"},
- {code:"801911",quantity:3,unitPrice:59.90,reason:"Livro eletrônico CT1"}
+ {code:"801911",quantity:3,unitPrice:59.90,reason:"Livro eletrônico tradicional"}
 ];
 
 const NEW_CUSTOMER_REQUIRED:Ct1RequiredItem[]=[
@@ -10,18 +11,33 @@ const NEW_CUSTOMER_REQUIRED:Ct1RequiredItem[]=[
  {code:"801911",quantity:3,unitPrice:59.90,reason:"Livro eletrônico Cliente Novo"}
 ];
 
-const ABOVE_2500:Ct1RequiredItem={
- code:"849081",quantity:1,unitPrice:199.90,reason:"Seguro prestamista acima de R$ 2.500,00"
-};
+export const PRESTAMISTA_CODES=["849043","849050","849067","849074","849081"] as const;
 
-export function ct1RequiredItems(mainProductPrice:number):Ct1RequiredItem[]{
- return requiredItemsForPlan("CT1",mainProductPrice);
+const PRESTAMISTA_BANDS:ReadonlyArray<Ct1RequiredItem&{minimumExclusive:number}>=[
+ {code:"849081",quantity:1,minimumExclusive:2500,reason:"Seguro prestamista: total acima de R$ 2.500,00"},
+ {code:"849074",quantity:1,minimumExclusive:2000,reason:"Seguro prestamista: total de R$ 2.000,01 a R$ 2.500,00"},
+ {code:"849067",quantity:1,minimumExclusive:1500,reason:"Seguro prestamista: total de R$ 1.500,01 a R$ 2.000,00"},
+ {code:"849050",quantity:1,minimumExclusive:1000,reason:"Seguro prestamista: total de R$ 1.000,01 a R$ 1.500,00"},
+ {code:"849043",quantity:1,minimumExclusive:Number.NEGATIVE_INFINITY,reason:"Seguro prestamista: total até R$ 1.000,00"}
+];
+
+export function baseRequiredItemsForPlan(plan:CreditPlan):Ct1RequiredItem[]{
+ return (plan==="48"?NEW_CUSTOMER_REQUIRED:TRADITIONAL_REQUIRED).map(item=>({...item}));
 }
 
-export function requiredItemsForPlan(plan:"48"|"CT1"|"CT2",mainProductPrice:number):Ct1RequiredItem[]{
- if(!Number.isFinite(mainProductPrice)||mainProductPrice<=0){
-  throw new Error("TRADITIONAL_PRODUCT_PRICE_REQUIRED");
+/** O total recebido já deve excluir qualquer produto da família 849xxx. */
+export function prestamistaItemForTotal(totalWithoutPrestamista:number):Ct1RequiredItem{
+ if(!Number.isFinite(totalWithoutPrestamista)||totalWithoutPrestamista<0){
+  throw new Error("TRADITIONAL_CART_TOTAL_REQUIRED");
  }
- const always=plan==="48"?NEW_CUSTOMER_REQUIRED:TRADITIONAL_REQUIRED;
- return mainProductPrice>2500?[...always,ABOVE_2500]:[...always];
+ const selected=PRESTAMISTA_BANDS.find(item=>totalWithoutPrestamista>item.minimumExclusive)!;
+ return {code:selected.code,quantity:1,reason:selected.reason};
+}
+
+export function requiredItemsForPlan(plan:CreditPlan,totalWithoutPrestamista:number):Ct1RequiredItem[]{
+ return [...baseRequiredItemsForPlan(plan),prestamistaItemForTotal(totalWithoutPrestamista)];
+}
+
+export function ct1RequiredItems(totalWithoutPrestamista:number):Ct1RequiredItem[]{
+ return requiredItemsForPlan("CT1",totalWithoutPrestamista);
 }

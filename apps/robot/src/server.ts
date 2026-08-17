@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import {ALLOWED_ORIGINS,CLICK_BASE_URL,PORT} from "./config.js";
-import {createClickContext,refreshClickSession} from "./browser.js";
+import {refreshClickSession,withAuthenticatedClickPage} from "./browser.js";
 import {searchProduct} from "./productSearch.js";
 import {simulateCredit} from "./creditSimulation.js";
 import {verifyFirebaseBearer} from "./firebaseAuth.js";
@@ -32,15 +32,17 @@ function publicError(e:unknown){
  const m=e instanceof Error?e.message:"UNKNOWN";
  const known=new Set([
   "CLICK_CREDENTIALS_NOT_CONFIGURED","CLICK_INTERACTIVE_CHALLENGE_REQUIRED","CLICK_SESSION_EXPIRED",
+  "CLICK_LOGIN_FAILED",
   "PRODUCT_SEARCH_NOT_AVAILABLE","PRODUCT_NOT_FOUND","BUY_ACTION_NOT_FOUND","VOLTAGE_REQUIRED","VOLTAGE_OPTION_NOT_FOUND",
   "CPF_REQUIRED","CPF_FIELD_NOT_FOUND","CHECKOUT_ADVANCE_NOT_FOUND","CREDIT_OPTION_NOT_FOUND",
   "CREDIT_PLAN_NOT_FOUND","INSTALLMENTS_FIELD_NOT_FOUND","ENTRY_REQUIRED","ENTRY_FIELD_NOT_FOUND",
   "CT1_INSTALLMENTS_OUT_OF_RANGE","CREDIT_REQUEST_FAILED","CREDIT_RESULT_NOT_PARSED",
   "CT1_PRODUCT_PRICE_REQUIRED","CT1_CART_PREPARATION_FAILED","TRADITIONAL_PRODUCT_PRICE_REQUIRED","TRADITIONAL_CART_PREPARATION_FAILED",
+  "TRADITIONAL_CART_TOTAL_REQUIRED","PRESTAMISTA_BAND_SETUP_FAILED",
   "CPF_SUBMIT_FAILED","WARRANTY_SERVICE_FAILED","CT2_INSTALLMENTS_OUT_OF_RANGE",
   "CT2_PAYMENT_SETUP_FAILED","CT2_VARIABLE_ENTRY_FAILED","CT2_PAYMENT_ID_NOT_FOUND","CT2_ENTRY_BELOW_MINIMUM",
   "48_INSTALLMENTS_OUT_OF_RANGE","48_PAYMENT_SETUP_FAILED","48_VARIABLE_ENTRY_FAILED",
-  "48_PAYMENT_ID_NOT_FOUND","48_ENTRY_BELOW_MINIMUM","NEW_CUSTOMER_CART_CLEANUP_FAILED"
+  "48_PAYMENT_ID_NOT_FOUND","48_ENTRY_BELOW_MINIMUM","NEW_CUSTOMER_CART_CLEANUP_FAILED","CART_CLEANUP_FAILED"
  ]);
  return known.has(m)?m:"AUTOMATION_FAILED";
 }
@@ -58,13 +60,8 @@ app.get("/api/products/:code",auth,async(req,res)=>{
  const code=String(req.params.code||"").trim();
  if(!code)return res.status(400).json({error:"PRODUCT_CODE_REQUIRED"});
  try{
-  const {context,close}=await createClickContext();
-  try{
-   const page=await context.newPage();
-   await page.goto(CLICK_BASE_URL,{waitUntil:"domcontentloaded",timeout:60000});
-   const result=await searchProduct(page,code);
-   res.json(result);
-  }finally{await close()}
+  const result=await withAuthenticatedClickPage(page=>searchProduct(page,code));
+  res.json(result);
  }catch(e){
   console.error(`[GET /api/products/${code}]`,e);
   res.status(500).json({error:publicError(e)});
@@ -83,12 +80,7 @@ app.post("/api/credit/simulate",auth,async(req,res)=>{
   warranty:Boolean(body.warranty)
  };
  try{
-  const {context,close}=await createClickContext();
-  try{
-   const page=await context.newPage();
-   await page.goto(CLICK_BASE_URL,{waitUntil:"domcontentloaded",timeout:60000});
-   res.json(await simulateCredit(page,request));
-  }finally{await close()}
+  res.json(await withAuthenticatedClickPage(page=>simulateCredit(page,request)));
  }catch(e){
   console.error("[POST /api/credit/simulate]",e);
   const error=publicError(e);

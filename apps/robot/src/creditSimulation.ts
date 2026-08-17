@@ -3,9 +3,13 @@ import {CLICK_DEFAULT_CPF} from "./config.js";
 import {clickText,pageContains} from "./flowHelpers.js";
 import {searchProduct} from "./productSearch.js";
 import {extractCreditResult,formatBrazilianMoney,parseCt2MinimumEntry} from "./creditResultParser.js";
-import {requiredItemsForPlan,type Ct1RequiredItem} from "./ct1CartRules.js";
+import {
+ baseRequiredItemsForPlan,PRESTAMISTA_CODES,prestamistaItemForTotal,type Ct1RequiredItem
+} from "./ct1CartRules.js";
 import {chooseWarrantyHref} from "./warrantySelection.js";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "./warrantyService.js";
+import {clearCreditCart,parseCartProductCodes} from "./cartCleanup.js";
+import {isPaymentEntryId,parsePaymentEntryId} from "./paymentEntryId.js";
 
 export type CreditPlan="48"|"CT1"|"CT2";
 export interface CreditRequest{
@@ -95,21 +99,10 @@ async function enterCpfAndAdvanceTraditional(page:Page,cpf:string){
  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 }
 
-async function prepareCreditCart(page:Page,plan:CreditPlan,mainProductPrice:number){
+async function addRequiredCartItems(page:Page,items:Ct1RequiredItem[]){
  const origin=new URL(page.url()).origin;
  const cartUrl=`${origin}/checkout_catalogo/carrinho.php`;
  const headers={referer:page.url(),"x-requested-with":"XMLHttpRequest"};
- const items=requiredItemsForPlan(plan,mainProductPrice);
-
- // O carrinho fica associado à sessão da Plataforma Click. Por isso, uma
- // simulação CT1/CT2 anterior pode deixar o AF tradicional no carrinho.
- // Cliente Novo 48 usa exclusivamente o AF 447157.
- if(plan==="48"){
-  const removed=await page.request.get(cartUrl,{
-   params:{cod:"447164",acao:"excluir"},headers,timeout:60000
-  });
-  if(!removed.ok())throw new Error("NEW_CUSTOMER_CART_CLEANUP_FAILED");
- }
 
  const current=await page.request.get(cartUrl,{headers,timeout:60000});
  if(!current.ok())throw new Error("TRADITIONAL_CART_PREPARATION_FAILED");
@@ -127,19 +120,56 @@ async function prepareCreditCart(page:Page,plan:CreditPlan,mainProductPrice:numb
 
   // A Click usa este endpoint para fixar a quantidade. Os valores unitários
   // abaixo foram confirmados nos fluxos HAR de CT1, CT2 e Cliente Novo 48.
-  const quantity=await page.request.get(`${origin}/checkout_catalogo/carrinho_quantidade_ajax.php`,{
-   params:{
-    cod:item.code,qtd:String(item.quantity),vl_venda:String(item.unitPrice),
-    prevent_cache:new Date().toString(),_:String(Date.now())
-   },
-   headers,timeout:60000
-  });
-  if(!quantity.ok())throw new Error("TRADITIONAL_CART_PREPARATION_FAILED");
+  if(item.unitPrice!==undefined){
+   const quantity=await page.request.get(`${origin}/checkout_catalogo/carrinho_quantidade_ajax.php`,{
+    params:{
+     cod:item.code,qtd:String(item.quantity),vl_venda:String(item.unitPrice),
+     prevent_cache:new Date().toString(),_:String(Date.now())
+    },
+    headers,timeout:60000
+   });
+   if(!quantity.ok())throw new Error("TRADITIONAL_CART_PREPARATION_FAILED");
+  }
  }
 
  await page.goto(cartUrl,{waitUntil:"domcontentloaded",timeout:60000});
  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
  return items.map((item:Ct1RequiredItem)=>({code:item.code,quantity:item.quantity,reason:item.reason}));
+}
+
+async function prepareBaseCreditCart(page:Page,plan:CreditPlan){
+ return addRequiredCartItems(page,baseRequiredItemsForPlan(plan));
+}
+
+async function preparePrestamistaBand(page:Page,totalWithoutPrestamista:number){
+ const origin=new URL(page.url()).origin;
+ const cartUrl=`${origin}/checkout_catalogo/carrinho.php`;
+ const headers={referer:page.url(),"x-requested-with":"XMLHttpRequest"};
+ const selected=prestamistaItemForTotal(totalWithoutPrestamista);
+
+ // Nunca podem existir duas faixas juntas. Removemos todos os cinco códigos
+ // possíveis antes de adicionar exatamente o que corresponde ao subtotal.
+ for(const code of PRESTAMISTA_CODES){
+  const removed=await page.request.get(cartUrl,{
+   params:{cod:code,acao:"excluir"},headers,timeout:60000
+  });
+  if(!removed.ok())throw new Error("PRESTAMISTA_BAND_SETUP_FAILED");
+ }
+
+ const added=await page.request.get(cartUrl,{
+  params:{cod:selected.code,acao:"incluir"},headers,timeout:60000
+ });
+ if(!added.ok())throw new Error("PRESTAMISTA_BAND_SETUP_FAILED");
+
+ // A inclusão já cria uma unidade e usa o preço oficial da Plataforma Click.
+ await page.goto(cartUrl,{waitUntil:"domcontentloaded",timeout:60000});
+ await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+ const cartCodes=parseCartProductCodes(await page.content());
+ const present=PRESTAMISTA_CODES.filter(code=>cartCodes.includes(code));
+ if(present.length!==1||present[0]!==selected.code){
+  throw new Error("PRESTAMISTA_BAND_SETUP_FAILED");
+ }
+ return {code:selected.code,quantity:1,reason:selected.reason};
 }
 
 async function applyTraditionalWarrantyService(page:Page,productCode:string,enabled:boolean){
@@ -204,6 +234,39 @@ async function reloadPaymentPage(page:Page,origin:string){
  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 }
 
+async function readPaymentEntryId(page:Page,origin:string,plan:CreditPlan){
+ const selectors:Array<[string,string]>=[
+  ['#pagamentos_ent [data-cdpagamento]',"data-cdpagamento"],
+  ['form[name="pagamentos_ent"] [data-cdpagamento]',"data-cdpagamento"],
+  ['#pagamentos_ent .remove-payment[data-item]',"data-item"],
+  ['#pagamentos_ent .col-excluir [data-item]',"data-item"],
+  ['#pagamentos_ent .entrada-variavel[data-item]',"data-item"],
+  ['#pagamentos_ent [data-item]',"data-item"]
+ ];
+
+ for(let attempt=0;attempt<2;attempt++){
+  for(const [selector,attribute] of selectors){
+   const locator=page.locator(selector).first();
+   if(await locator.count()===0)continue;
+   const value=await locator.getAttribute(attribute,{timeout:1200}).catch(()=>null);
+   if(isPaymentEntryId(value||undefined))return value;
+  }
+
+  const parsed=parsePaymentEntryId(await page.content().catch(()=>""));
+  if(parsed)return parsed;
+  if(attempt===0)await reloadPaymentPage(page,origin);
+ }
+
+ const body=(await page.locator("body").innerText().catch(()=>"")).slice(0,12000);
+ console.error("[credit] identificador da entrada não encontrado",{
+  plan,url:page.url(),
+  hasPaymentsForm:/pagamentos_ent/i.test(await page.content().catch(()=>"")),
+  hasVariableEntry:/entrada\s+vari[aá]vel/i.test(body),
+  hasPrestamistaWarning:/prestamista\s+fora|faixa\s+incorreta/i.test(body)
+ });
+ return undefined;
+}
+
 function variableEntryError(plan:CreditPlan,suffix:string){
  return `${plan}_${suffix}`;
 }
@@ -239,10 +302,8 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
  if(minimum!==undefined&&downPayment<minimum)throw new Error(variableEntryError(req.plan,"ENTRY_BELOW_MINIMUM"));
 
  // A linha de entrada recebe um identificador dinâmico a cada simulação.
- const entrySection=page.locator("#pagamentos_ent");
- const paymentId=await entrySection.locator("[data-cdpagamento]").first().getAttribute("data-cdpagamento")
-  ||await entrySection.locator("[data-item]").first().getAttribute("data-item");
- if(!paymentId||!/^\d+$/.test(paymentId))throw new Error(variableEntryError(req.plan,"PAYMENT_ID_NOT_FOUND"));
+ const paymentId=await readPaymentEntryId(page,origin,req.plan);
+ if(!paymentId)throw new Error(variableEntryError(req.plan,"PAYMENT_ID_NOT_FOUND"));
 
  // 3) Preenche a entrada. A chamada abaixo é o evento disparado quando o
  // vendedor clica fora do campo (blur/change) no site da Plataforma Click.
@@ -280,6 +341,11 @@ export async function simulateCredit(page:Page,req:CreditRequest){
  const cpf=(req.cpf||CLICK_DEFAULT_CPF).replace(/\D/g,"");
  if(cpf.length!==11)throw new Error("CPF_REQUIRED");
 
+ // O carrinho é persistido nos cookies da sessão da Plataforma Click. Toda
+ // simulação começa vazia para não somar produtos, garantia ou pagamento da
+ // consulta anterior ao novo resultado.
+ await clearCreditCart(page);
+
  const product=await searchProduct(page,req.code);
  if(!product.found)throw new Error("PRODUCT_NOT_FOUND");
 
@@ -294,9 +360,13 @@ export async function simulateCredit(page:Page,req:CreditRequest){
  await page.waitForTimeout(650);
 
  const voltage=await chooseVoltageIfRequested(page,req.voltage);
- let warranty=await chooseWarranty(page,Boolean(req.warranty));
- const requiredProducts=await prepareCreditCart(page,req.plan,Number(product.price));
- warranty=await applyTraditionalWarrantyService(page,req.code,Boolean(req.warranty));
+ await chooseWarranty(page,Boolean(req.warranty));
+ const baseRequiredProducts=await prepareBaseCreditCart(page,req.plan);
+ const warranty=await applyTraditionalWarrantyService(page,req.code,Boolean(req.warranty));
+ // Este total ainda não contém nenhum 849xxx e é a única base usada para
+ // escolher a faixa, exatamente antes de incluir o produto prestamista.
+ const prestamistaProduct=await preparePrestamistaBand(page,warranty.cartTotalAfterWarranty);
+ const requiredProducts=[...baseRequiredProducts,prestamistaProduct];
  await enterCpfAndAdvanceTraditional(page,cpf);
 
  if(req.plan==="CT1"){
