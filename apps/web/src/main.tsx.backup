@@ -1,0 +1,229 @@
+import React, { useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./styles.css";
+import { CreditSimulator } from "./CreditSimulator";
+import { ProductIntelligence } from "./ProductIntelligence";
+import { CustomerInsight } from "./CustomerInsight";
+import { SalesCopilot } from "./SalesCopilot";
+import { SmartBasket } from "./SmartBasket";
+import { ProductBattle } from "./ProductBattle";
+import { BudgetCalculator } from "./BudgetCalculator";
+import { ShareComparison } from "./ShareComparison";
+import { SalesLearning } from "./SalesLearning";
+import { SalesTraining } from "./SalesTraining";
+import { SellerProgress } from "./SellerProgress";
+import { PerformanceDashboard } from "./PerformanceDashboard";
+import { ComparisonShare } from "./ComparisonShare";
+import { SalesIntelligencePanel } from "./SalesIntelligencePanel";
+import { AdaptiveSalesCoach } from "./AdaptiveSalesCoach";
+import { SmartClosePanel } from "./SmartClosePanel";
+import { PublicComparison, readComparisonFromLocation } from "./PublicComparison";
+import { LiveProductPanel } from "./LiveProductPanel";
+import { LiveProductProvider } from "./LiveProductContext";
+import { LiveSalesTools } from "./LiveSalesTools";
+import { SmartCatalogPanel } from "./SmartCatalogPanel";
+import { SmartCrossSell } from "./SmartCrossSell";
+import { CrossSellChain } from "./CrossSellChain";
+import { CustomerRadarPanel } from "./CustomerRadarPanel";
+import { NeedAwareRecommendations } from "./NeedAwareRecommendations";
+import { ClosingCoach } from "./ClosingCoach";
+import { ConversationMap } from "./ConversationMap";
+import { VoiceCopilot } from "./VoiceCopilot";
+import { ObjectionBankPanel } from "./ObjectionBankPanel";
+import { PersonalTrainerPanel } from "./PersonalTrainerPanel";
+import { CustomerSimulatorPanel } from "./CustomerSimulatorPanel";
+import { ProductQuizGamification } from "./ProductQuizGamification";
+import { AuthProvider } from "./AuthContext";
+import { LoginPanel } from "./LoginPanel";
+import { CloudSyncPanel } from "./CloudSyncPanel";
+import { CloudAttendanceActions } from "./CloudAttendanceActions";
+import { CrediarioSimulator } from "./CrediarioSimulator";
+import { SecureProductLookup } from "./SecureProductLookup";
+
+const ROBOT_URL = "http://localhost:8081";
+
+const stages = [
+  ["abordagem","Abordagem","Receba o cliente e descubra o motivo da visita."],
+  ["descoberta","Descoberta","Entenda necessidade, prioridade, orçamento e pagamento."],
+  ["selecao","Seleção","Pesquise e separe poucas opções que realmente façam sentido."],
+  ["demonstracao","Demonstração","Conecte características aos benefícios que o cliente procura."],
+  ["negociacao","Negociação","Trabalhe objeções, condição e produtos complementares."],
+  ["fechamento","Fechamento","Confirme a escolha e conduza o próximo passo."]
+] as const;
+type Stage = typeof stages[number][0];
+type ProductResult = {found:boolean;code:string;text:string;url?:string;title?:string};
+
+function App() {
+  const [started,setStarted]=useState(false);
+  const [customer,setCustomer]=useState("");
+  const [objective,setObjective]=useState("");
+  const [budget,setBudget]=useState("");
+  const [stage,setStage]=useState<Stage>("abordagem");
+  const [note,setNote]=useState("");
+  const [notes,setNotes]=useState<string[]>([]);
+  const [code,setCode]=useState("");
+  const [searching,setSearching]=useState(false);
+  const [product,setProduct]=useState<ProductResult|null>(null);
+  const [searchError,setSearchError]=useState("");
+
+  const currentIndex=stages.findIndex(s=>s[0]===stage);
+  const current=stages[currentIndex];
+  const progress=((currentIndex+1)/stages.length)*100;
+
+  const nextQuestion=useMemo(()=>{
+    const qs:Record<Stage,string>={
+      abordagem:"O que você está procurando hoje?",
+      descoberta:"O que é mais importante: preço, qualidade, recursos ou parcela?",
+      selecao:"Você já viu algum modelo ou quer que eu separe as melhores opções?",
+      demonstracao:"Esse benefício resolve o que você comentou no início?",
+      negociacao:"O que está faltando para essa opção ficar boa para você?",
+      fechamento:"Podemos seguir com essa opção?"
+    };
+    return qs[stage];
+  },[stage]);
+
+  async function searchProduct(e:React.FormEvent){
+    e.preventDefault();
+    setSearching(true); setSearchError(""); setProduct(null);
+    try{
+      const r=await fetch(`${ROBOT_URL}/api/products/search`,{
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:code.trim()})
+      });
+      const data=await r.json();
+      if(!r.ok) throw new Error(data.error||"Não foi possível pesquisar.");
+      setProduct(data);
+      if(data.found && stage==="descoberta") setStage("selecao");
+    }catch(err){setSearchError(err instanceof Error?err.message:"Erro na pesquisa.");}
+    finally{setSearching(false);}
+  }
+
+  if(!started){
+    return <main className="shell"><section className="welcome">
+      <span className="eyebrow">XVendas • Módulos 01 + 02</span>
+      <h1>Modo Atendimento</h1>
+      <p>Inicie o atendimento e pesquise produtos pelo código sem sair da conversa.</p>
+      <form onSubmit={e=>{e.preventDefault();setStarted(true)}} className="startForm">
+        <label>Nome do cliente <small>(opcional)</small><input value={customer} onChange={e=>setCustomer(e.target.value)} /></label>
+        <label>O que ele procura?<input required value={objective} onChange={e=>setObjective(e.target.value)} placeholder="Ex.: fogão para apartamento" /></label>
+        <label>Orçamento aproximado <small>(opcional)</small><input value={budget} onChange={e=>setBudget(e.target.value)} inputMode="decimal" /></label>
+        <button className="primary">Iniciar atendimento</button>
+      </form>
+    </section></main>;
+  }
+
+  return <main className="shell">
+    <header className="top"><div><span className="eyebrow">Atendimento em andamento</span><h1>{customer||"Cliente"} <small>• {objective}</small></h1></div><button className="ghost" onClick={()=>setStarted(false)}>Encerrar tela</button></header>
+    <div className="progress"><span style={{width:`${progress}%`}}/></div>
+    <section className="stageNav">{stages.map(([id,label],i)=><button key={id} className={stage===id?"stage active":"stage"} onClick={()=>setStage(id)}><b>{i+1}</b><span>{label}</span></button>)}</section>
+
+    <section className="layout">
+      <article className="mainCard">
+        <span className="step">Etapa {currentIndex+1} de {stages.length}</span><h2>{current[1]}</h2><p className="guidance">{current[2]}</p>
+        <div className="question"><span>❓ O que pergunto agora?</span><strong>{nextQuestion}</strong></div>
+
+        <section className="productSearch">
+          <div><span className="step">🔎 Pesquisa Rápida de Produto</span><h3>Buscar pelo código</h3></div>
+          <form onSubmit={searchProduct} className="searchRow">
+            <input value={code} onChange={e=>setCode(e.target.value)} placeholder="Código do produto" required />
+            <button className="primary" disabled={searching}>{searching?"Pesquisando...":"Pesquisar"}</button>
+          </form>
+          {searchError && <div className="error">{searchError}</div>}
+          {product && <div className={product.found?"productResult found":"productResult"}>
+            <strong>{product.found?"Produto localizado":"Produto não localizado"}</strong>
+            <span>Código: {product.code}</span>
+            {product.text && <p>{product.text}</p>}
+          </div>}
+        </section>
+
+        <LoginPanel />
+
+        <CloudSyncPanel />
+
+        <CloudAttendanceActions customerName={customer} objective={objective} budget={budget} stage={current[1]} notes={notes} productCode={product?.code || code} />
+
+        <CustomerRadarPanel notes={notes} objective={objective} budget={budget} />
+
+        <NeedAwareRecommendations notes={notes} objective={objective} budget={budget} />
+
+        <ClosingCoach notes={notes} stage={current[1]} budget={budget} />
+
+        <ConversationMap notes={notes} objective={objective} budget={budget} stage={current[1]} />
+
+        <VoiceCopilot onTranscript={text=>setNotes(v=>[...v,text])} />
+
+        <ObjectionBankPanel stage={current[1]} />
+
+        <PersonalTrainerPanel notes={notes} objective={objective} budget={budget} stage={current[1]} />
+
+        <CustomerSimulatorPanel />
+
+        <ProductQuizGamification />
+
+        <CustomerInsight notes={notes} objective={objective} budget={budget} stage={current[1]} />
+
+        <SalesCopilot notes={notes} objective={objective} budget={budget} stage={current[1]} />
+
+        <SmartBasket objective={objective} budget={budget} searchedCode={product?.code || code} />
+
+        <ProductBattle budget={budget} />
+
+        <BudgetCalculator initialBudget={budget} />
+
+        <ShareComparison />
+
+        <SalesLearning notes={notes} />
+
+        <SalesTraining />
+
+        <SellerProgress />
+
+        <PerformanceDashboard />
+
+        <ComparisonShare />
+
+        <SalesIntelligencePanel />
+
+        <AdaptiveSalesCoach notes={notes} objective={objective} budget={budget} />
+
+        <SecureProductLookup />
+
+        <CrediarioSimulator />
+
+        <SmartClosePanel notes={notes} objective={objective} budget={budget} stage={current[1]} />
+
+        <LiveProductPanel defaultCode={product?.code || code} />
+
+        <SmartCatalogPanel />
+
+        <LiveSalesTools />
+
+        <SmartCrossSell />
+
+        <CrossSellChain />
+
+        <ProductIntelligence searchedCode={product?.code || code} />
+
+        <CreditSimulator defaultCode={product?.code || code} />
+
+        <label className="notesLabel">Anote o que o cliente disse</label>
+        <div className="noteRow"><textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Preferências, objeções, necessidades..."/><button onClick={()=>{if(note.trim()){setNotes(v=>[...v,note.trim()]);setNote("")}}}>Adicionar</button></div>
+        <div className="actions"><button onClick={()=>currentIndex>0&&setStage(stages[currentIndex-1][0])} disabled={currentIndex===0}>← Voltar</button><button className="primary" onClick={()=>currentIndex<stages.length-1&&setStage(stages[currentIndex+1][0])} disabled={currentIndex===stages.length-1}>Próxima etapa →</button></div>
+      </article>
+
+      <aside>
+        <section className="sideCard"><h3>Resumo do cliente</h3><dl><div><dt>Objetivo</dt><dd>{objective}</dd></div><div><dt>Orçamento</dt><dd>{budget?`R$ ${budget}`:"Não informado"}</dd></div><div><dt>Etapa</dt><dd>{current[1]}</dd></div>{product?.found&&<div><dt>Produto pesquisado</dt><dd>{product.code}</dd></div>}</dl></section>
+        <section className="sideCard"><h3>Mapa da conversa</h3>{notes.length===0?<p className="muted">As informações importantes aparecerão aqui.</p>:<ul>{notes.map((n,i)=><li key={i}>{n}</li>)}</ul>}</section>
+        <section className="sideCard next"><span>➡️ Próxima Melhor Ação</span><strong>{currentIndex<stages.length-1?`Conclua ${current[1].toLowerCase()} e avance para ${stages[currentIndex+1][1].toLowerCase()}.`:"Peça a confirmação da escolha e conduza o fechamento."}</strong></section>
+      </aside>
+    </section>
+  </main>;
+}
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <AuthProvider>
+      <LiveProductProvider>
+        <App />
+      </LiveProductProvider>
+    </AuthProvider>
+  </React.StrictMode>
+);
