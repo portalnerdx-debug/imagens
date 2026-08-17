@@ -29,6 +29,14 @@ export function parseCartProductCodes(html:string):string[]{
  // Algumas telas executam excluir/remover por JavaScript.
  for(const match of source.matchAll(/(?:excluir|remover)[\w$]*\s*\(\s*["']?(\d{5,9})/gi))add(match[1]);
 
+ // Fluxo atual observado na Plataforma Click: o botão possui
+ // class="link-excluir" e guarda o código em data-item.
+ for(const match of source.matchAll(/<(?:a|button)\b[^>]*>/gi)){
+  const tag=match[0];
+  if(!/class=["'][^"']*\blink-excluir\b[^"']*["']/i.test(tag))continue;
+  add(tag.match(/data-item=["'](\d{5,9})["']/i)?.[1]);
+ }
+
  // Identificadores gravados diretamente na linha do item.
  for(const match of source.matchAll(/data-(?:cod|codigo|produto|itprodd)=["'](\d{5,9})["']/gi))add(match[1]);
  for(const match of source.matchAll(/name=["'](?:cod|codigo|cd_itprodd)["'][^>]{0,100}value=["'](\d{5,9})["']/gi))add(match[1]);
@@ -55,6 +63,7 @@ export function parseCartItemCount(html:string):number|undefined{
 export async function clearCreditCart(page:Page){
  const origin=new URL(page.url()).origin;
  const cartUrl=`${origin}/checkout_catalogo/carrinho.php`;
+ const removeUrl=`${origin}/checkout_catalogo/carrinho_excluir_ajax.php`;
  const headers={referer:page.url(),"x-requested-with":"XMLHttpRequest"};
 
  let current=await page.request.get(cartUrl,{headers,timeout:60000});
@@ -73,8 +82,10 @@ export async function clearCreditCart(page:Page){
   }
 
   for(const code of codes){
-   const removed=await page.request.get(cartUrl,{
-    params:{cod:code,acao:"excluir"},headers,timeout:60000
+   // É a mesma chamada feita pelo clique no X da linha do carrinho.
+   const removed=await page.request.get(removeUrl,{
+    params:{cod:code,prevent_cache:new Date().toString(),_:String(Date.now())},
+    headers,timeout:60000
    });
    if(!removed.ok())throw new Error("CART_CLEANUP_FAILED");
    removedProducts.add(code);
@@ -93,6 +104,7 @@ export async function clearCreditCart(page:Page){
 
  // Remove uma condição/entrada variável antiga que ainda esteja na sessão.
  const reset=await page.request.get(`${origin}/checkout_catalogo/processa_reseta_pagtos.php`,{
+  params:{prevent_cache:new Date().toString(),_:String(Date.now())},
   headers,timeout:60000
  });
  if(!reset.ok())throw new Error("CART_CLEANUP_FAILED");
