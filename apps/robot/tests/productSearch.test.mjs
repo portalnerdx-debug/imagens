@@ -210,11 +210,23 @@ test("renova a sessão expirada e repete a operação somente uma vez",async()=>
  assert.equal(refreshes,1);
 });
 
-test("não renova a sessão para erros que não sejam de expiração",async()=>{
+test("não cria sessão nova para erros que não sejam recuperáveis",async()=>{
  let refreshes=0;
  await assert.rejects(
   runWithSessionRetry(async()=>{throw new Error("PRODUCT_NOT_FOUND")},async()=>{refreshes++}),
   /PRODUCT_NOT_FOUND/
  );
  assert.equal(refreshes,0);
+});
+
+test("cria sessão nova quando o carrinho não consegue confirmar zero itens",async()=>{
+ let attempts=0,refreshes=0;
+ const result=await runWithSessionRetry(async()=>{
+  attempts++;
+  if(attempts===1)throw new Error("CART_CLEANUP_FAILED");
+  return "carrinho novo";
+ },async()=>{refreshes++});
+ assert.equal(result,"carrinho novo");
+ assert.equal(attempts,2);
+ assert.equal(refreshes,1);
 });
