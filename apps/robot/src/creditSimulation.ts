@@ -23,6 +23,24 @@ export interface CreditRequest{
 }
 
 async function chooseVoltageIfRequested(page:Page,voltage?:string){
+ // Depois de clicar em Comprar, a Click abre este modal. O título do produto
+ // atrás dele também contém "110V" e é considerado visível pelo navegador,
+ // porém não pode receber clique porque o modal intercepta os eventos.
+ const confirmationModal=page.locator("#ModalConfirmacao").first();
+ const modalVisible=await confirmationModal.isVisible({timeout:2500}).catch(()=>false);
+ if(modalVisible){
+  if(!voltage)throw new Error("VOLTAGE_REQUIRED");
+  const rx=voltage==="110"?/110\s*v|127\s*v/i:/220\s*v/i;
+  const option=confirmationModal.getByRole("link",{name:rx}).first();
+  if(!await option.isVisible({timeout:2000}).catch(()=>false)){
+   throw new Error("VOLTAGE_OPTION_NOT_FOUND");
+  }
+  await option.click();
+  await page.waitForLoadState("domcontentloaded",{timeout:8000}).catch(()=>{});
+  await page.waitForTimeout(350);
+  return {required:true,selected:voltage};
+ }
+
  const asksVoltage=await pageContains(page,/110\s*v|127\s*v|220\s*v|voltagem/i);
  if(!asksVoltage)return {required:false,selected:undefined};
  if(!voltage)throw new Error("VOLTAGE_REQUIRED");
