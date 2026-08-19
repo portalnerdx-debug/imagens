@@ -49,7 +49,8 @@ export function extractCreditResult(text:string,req:CreditResultRequest){
   };
  }
 
- const installmentRegex=new RegExp(`${req.installments}\\s*x\\s*(?:de\\s*)?R\\$\\s*([\\d.]+,\\d{2})`,"i");
+ // Algumas respostas da Click omitem o prefixo R$ na coluna "Detalhes".
+ const installmentRegex=new RegExp(`${req.installments}\\s*x\\s*(?:de\\s*)?(?:R\\$\\s*)?([\\d.]+,\\d{2})`,"i");
  const installmentMatch=text.match(installmentRegex);
  const totalMatch=text.match(/(?:total|valor total)\s*:\s*R\$\s*([\d.]+,\d{2})/i)
   || text.match(/(?:total|valor total)[^R$]{0,60}R\$\s*([\d.]+,\d{2})/i);

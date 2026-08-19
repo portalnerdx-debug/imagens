@@ -199,9 +199,9 @@ async function simulateCt1(page:Page,req:CreditRequest,context:{
  if(req.installments<1||req.installments>24)throw new Error("CT1_INSTALLMENTS_OUT_OF_RANGE");
 
  const origin=new URL(page.url()).origin;
- const response=await browserAjaxGet(page,`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`,{
-  cod_pagto:"CT1",qt_parcelas:String(req.installments),ajax:"1",_:String(Date.now())
- });
+ const endpoint=`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`;
+ const params={cod_pagto:"CT1",qt_parcelas:String(req.installments),ajax:"1",_:String(Date.now())};
+ const response=await browserAjaxGet(page,endpoint,params);
  if(!response.ok)throw new Error("CREDIT_REQUEST_FAILED");
 
  // O endpoint grava a condição na sessão. O resultado aparece somente depois
@@ -210,9 +210,27 @@ async function simulateCt1(page:Page,req:CreditRequest,context:{
   waitUntil:"domcontentloaded",timeout:60000
  });
  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
- const text=(await page.locator("body").innerText()).slice(0,30000);
- const result=extractCreditResult(text,req);
- if(result.installmentValue===undefined)throw new Error("CREDIT_RESULT_NOT_PARSED");
+ let text=await readCt1ResultText(page);
+ let result=extractCreditResult(text,req);
+ if(result.installmentValue===undefined){
+  // Em sessões mais lentas a primeira resposta HTTP termina antes de a Click
+  // persistir a condição. Repetimos somente a inclusão CT1, não a simulação.
+  const retried=await browserAjaxGet(page,endpoint,{...params,_:String(Date.now())});
+  if(retried.ok){
+   await reloadPaymentPage(page,origin);
+   text=await readCt1ResultText(page);
+   result=extractCreditResult(text,req);
+  }
+ }
+ if(result.installmentValue===undefined){
+  console.error("[credit] resultado CT1 não identificado",{
+   url:page.url(),installments:req.installments,
+   hasCt1:/\bCT1\b/i.test(text),
+   hasPaymentTable:/Forma de Pagto|Detalhes|Total/i.test(text),
+   resultBytes:text.length
+  });
+  throw new Error("CREDIT_RESULT_NOT_PARSED");
+ }
 
  return {
   ok:true,
@@ -222,6 +240,26 @@ async function simulateCt1(page:Page,req:CreditRequest,context:{
   message:"Tradicional sem entrada consultado na Plataforma Click.",
   safeStop:"Simulação CT1 concluída. Nenhuma compra ou pedido foi confirmado."
  };
+}
+
+async function readCt1ResultText(page:Page){
+ // No HTML real a linha fica em pagamentos_pgs. Ler o formulário diretamente
+ // evita perdê-la ao cortar os primeiros caracteres do texto completo da tela.
+ const payment=page.locator('#pagamentos_pgs, form[name="pagamentos_pgs"]').first();
+ if(await payment.count()){
+  const text=await payment.innerText({timeout:5000}).catch(()=>"");
+  const total=await page.locator(".valor-novo").first().innerText({timeout:1200}).catch(()=>"");
+  if(text)return `${text}\n${total}`;
+ }
+
+ const row=page.locator('[data-id="CT1"]').first().locator("xpath=ancestor::tr[1]");
+ const rowText=await row.innerText({timeout:2500}).catch(()=>"");
+ const totals=await page.locator(".valor-total, .valor-novo").allInnerTexts().catch(()=>[]);
+ if(rowText)return `${rowText}\n${totals.join("\n")}`;
+
+ // Fallback sem corte inicial: a tabela costuma ficar no final da página.
+ const body=await page.locator("body").innerText().catch(()=>"");
+ return body.slice(-50000);
 }
 
 async function reloadPaymentPage(page:Page,origin:string){

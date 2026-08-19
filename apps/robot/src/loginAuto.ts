@@ -12,6 +12,23 @@ async function firstVisible(page:Page,selectors:string[]){
  return null;
 }
 
+async function authenticatedClickPage(page:Page){
+ const selectors=[
+  "#UserInfo",
+  ".loginSaudacao",
+  'a[href*="loj_logoff_catalogo.php"]',
+  'a[href*="limpa_login_final.php"]',
+  'a[href*="dados-vendedor.php"]'
+ ];
+ for(const selector of selectors){
+  if(await page.locator(selector).first().isVisible({timeout:700}).catch(()=>false))return true;
+ }
+ const html=await page.content().catch(()=>"");
+ const protectedCart=/\/checkout_catalogo\/carrinho\.php/i.test(page.url())
+  &&await page.locator("#CarrinhoNumItens, .link-excluir, .carrinho").count()>0;
+ return protectedCart||/loj_logoff_catalogo\.php|limpa_login_final\.php|dados-vendedor\.php/i.test(html);
+}
+
 export async function performAutomaticLogin(page:Page){
  requireClickCredentials();
 
@@ -59,17 +76,18 @@ export async function performAutomaticLogin(page:Page){
   throw new Error("CLICK_LOGIN_FAILED");
  }
 
- await page.goto(CLICK_BASE_URL,{waitUntil:"domcontentloaded",timeout:60000});
- await page.waitForTimeout(500);
+ // Confirmamos a sessão em uma rota protegida. A página inicial pode continuar
+ // exibindo o formulário mesmo depois de o AJAX ter criado o cookie válido.
+ const protectedUrl=new URL("/checkout_catalogo/carrinho.php",CLICK_BASE_URL).toString();
+ await page.goto(protectedUrl,{waitUntil:"domcontentloaded",timeout:60000});
+ await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 
  // We never attempt to bypass CAPTCHA/MFA.
  const challenge=page.getByText(/captcha|código de verificação|autenticação em duas etapas|2fa|mfa/i).first();
  if(await challenge.isVisible({timeout:700}).catch(()=>false)){
   throw new Error("CLICK_INTERACTIVE_CHALLENGE_REQUIRED");
  }
- const loginFormVisible=await page.locator('#login input[name="nm_senha"]').first()
-  .isVisible({timeout:1000}).catch(()=>false);
- if(loginFormVisible)throw new Error("CLICK_LOGIN_FAILED");
+ if(!await authenticatedClickPage(page))throw new Error("CLICK_LOGIN_FAILED");
  return {alreadyAuthenticated:false};
 }
 
