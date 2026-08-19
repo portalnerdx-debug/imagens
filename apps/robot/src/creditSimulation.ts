@@ -6,7 +6,7 @@ import {extractCreditResult,formatBrazilianMoney,parseCt2MinimumEntry} from "./c
 import {
  baseRequiredItemsForPlan,PRESTAMISTA_CODES,prestamistaItemForTotal,type Ct1RequiredItem
 } from "./ct1CartRules.js";
-import {chooseWarrantyHref} from "./warrantySelection.js";
+import {chooseWarrantyHref,warrantyOptionCode} from "./warrantySelection.js";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "./warrantyService.js";
 import {parseCartProductCodes} from "./cartCleanup.js";
 import {isPaymentEntryId,parsePaymentEntryId,parsePaymentEntryIdPayload} from "./paymentEntryId.js";
@@ -67,7 +67,48 @@ async function chooseWarranty(page:Page,warranty:boolean){
   if(!hrefs.includes(href))hrefs.push(href);
  }
  const warrantyScreen=/garantiaNovo\.php/i.test(page.url())||hrefs.length>0;
- if(!warrantyScreen)return {shown:false,selected:false};
+ if(!warrantyScreen)return {shown:false,selected:false,serviceCode:undefined,months:0};
+
+ // A tela atual apresenta radios com ids 12meses, 24meses e semGarantia.
+ // O código do serviço varia por produto, então lemos o value da opção real.
+ const form=page.locator('form[name="garantia"]').first();
+ if(await form.count()){
+  const selector=warranty
+   ? 'input[name="op_garantia"][id*="12" i]'
+   : 'input[name="op_garantia"][value="0"]';
+  const option=form.locator(selector).first();
+  if(await option.count()){
+   const serviceCode=(await option.getAttribute("value"))||"0";
+   const productCode=await form.locator('input[name="cod"]').first().inputValue().catch(()=>"");
+   if(productCode){
+    await option.check({force:true});
+    const cartUrl=new URL("/checkout_catalogo/carrinho.php",page.url());
+    cartUrl.searchParams.set("cod",productCode);
+    cartUrl.searchParams.set("acao","incluir");
+    cartUrl.searchParams.set("op_garantia",serviceCode);
+    await page.goto(cartUrl.toString(),{waitUntil:"domcontentloaded",timeout:60000});
+    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+    return {
+     shown:true,selected:warranty,serviceCode,
+     months:warranty?12:0
+    };
+   }
+  }
+ }
+
+ // Compatibilidade com a versão antiga, que oferecia links em vez de radios.
+ if(warranty){
+  const twelveMonthLink=page.locator('a[href*="op_garantia="]')
+   .filter({hasText:/12\s*(?:mes(?:es)?|m\b)/i}).first();
+  if(await twelveMonthLink.isVisible({timeout:1000}).catch(()=>false)){
+   const href=await twelveMonthLink.getAttribute("href");
+   if(href){
+    await twelveMonthLink.click();
+    await page.waitForLoadState("domcontentloaded",{timeout:8000}).catch(()=>{});
+    return {shown:true,selected:true,serviceCode:warrantyOptionCode(href)||undefined,months:12};
+   }
+  }
+ }
 
  const chosenHref=chooseWarrantyHref(hrefs,warranty);
  if(chosenHref){
@@ -78,7 +119,11 @@ async function chooseWarranty(page:Page,warranty:boolean){
     await chosen.click();
     await page.waitForLoadState("domcontentloaded",{timeout:8000}).catch(()=>{});
     await page.waitForTimeout(300);
-    return {shown:true,selected:warranty};
+    return {
+     shown:true,selected:warranty,
+     serviceCode:warrantyOptionCode(chosenHref)||undefined,
+     months:warranty?12:0
+    };
    }
   }
   // Algumas versões da tela guardam a rota somente em JavaScript/onclick.
@@ -87,7 +132,11 @@ async function chooseWarranty(page:Page,warranty:boolean){
    waitUntil:"domcontentloaded",timeout:60000
   });
   await page.waitForTimeout(300);
-  return {shown:true,selected:warranty};
+  return {
+   shown:true,selected:warranty,
+   serviceCode:warrantyOptionCode(chosenHref)||undefined,
+   months:warranty?12:0
+  };
  }
 
  const clicked=warranty
@@ -96,7 +145,7 @@ async function chooseWarranty(page:Page,warranty:boolean){
  if(!clicked)throw new Error("WARRANTY_OPTION_NOT_FOUND");
  await page.waitForLoadState("domcontentloaded",{timeout:8000}).catch(()=>{});
  await page.waitForTimeout(300);
- return {shown:true,selected:warranty};
+ return {shown:true,selected:warranty,serviceCode:undefined,months:warranty?12:0};
 }
 
 async function enterCpfAndAdvanceTraditional(page:Page,cpf:string){
@@ -190,9 +239,9 @@ async function preparePrestamistaBand(page:Page,totalWithoutPrestamista:number){
  return {code:selected.code,quantity:1,reason:selected.reason};
 }
 
-async function applyTraditionalWarrantyService(page:Page,productCode:string,enabled:boolean){
+async function applyTraditionalWarrantyService(page:Page,productCode:string,enabled:boolean,selectedCode?:string){
  const origin=new URL(page.url()).origin;
- const serviceCode=warrantyServiceCode(enabled);
+ const serviceCode=warrantyServiceCode(enabled,selectedCode);
  const response=await page.request.get(`${origin}/checkout_catalogo/processa_servico_ajax.php`,{
   params:{
    cd_itprodd:productCode,cd_servico:serviceCode,op_servico:"Y",_:String(Date.now())
@@ -459,9 +508,12 @@ export async function simulateCredit(page:Page,req:CreditRequest){
  await page.waitForTimeout(650);
 
  const voltage=await chooseVoltageIfRequested(page,req.voltage);
- await chooseWarranty(page,Boolean(req.warranty));
+ const selectedWarranty=await chooseWarranty(page,Boolean(req.warranty));
  const baseRequiredProducts=await prepareBaseCreditCart(page,req.plan);
- const warranty=await applyTraditionalWarrantyService(page,req.code,Boolean(req.warranty));
+ const warrantyResult=await applyTraditionalWarrantyService(
+  page,req.code,Boolean(req.warranty),selectedWarranty.serviceCode
+ );
+ const warranty={...selectedWarranty,...warrantyResult};
  // Este total ainda não contém nenhum 849xxx e é a única base usada para
  // escolher a faixa, exatamente antes de incluir o produto prestamista.
  const prestamistaProduct=await preparePrestamistaBand(page,warranty.cartTotalAfterWarranty);

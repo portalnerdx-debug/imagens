@@ -1,7 +1,8 @@
 export const CLICK_EXTENDED_WARRANTY_CODE="831055";
 
-export function warrantyServiceCode(enabled:boolean){
- return enabled?CLICK_EXTENDED_WARRANTY_CODE:"0";
+export function warrantyServiceCode(enabled:boolean,selectedCode?:string){
+ if(!enabled)return "0";
+ return selectedCode&&selectedCode!=="0"?selectedCode:CLICK_EXTENDED_WARRANTY_CODE;
 }
 
 export function parseWarrantyCartTotal(text:string){
