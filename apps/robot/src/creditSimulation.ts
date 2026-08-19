@@ -288,14 +288,18 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
   headers,timeout:60000
  });
  if(!plan.ok())throw new Error(variableEntryError(req.plan,"PAYMENT_SETUP_FAILED"));
- const paymentIdFromSetup=parsePaymentEntryIdPayload(await plan.text());
+ const planPayload=await plan.text();
+ const paymentIdFromSetup=parsePaymentEntryIdPayload(planPayload);
  await reloadPaymentPage(page,origin);
+ const paymentIdFromSetupPage=parsePaymentEntryId(await page.content().catch(()=>""));
 
  // 2) Marca Entrada Variável e recarrega, como a interface da Click.
  const variable=await page.request.get(`${origin}/checkout_catalogo/processa_entrada_variavel_calc_ajax.php`,{
   params:{cod_pagto:req.plan,_:String(Date.now())},headers,timeout:60000
  });
  if(!variable.ok())throw new Error(variableEntryError(req.plan,"VARIABLE_ENTRY_FAILED"));
+ const variablePayload=await variable.text();
+ const paymentIdFromVariable=parsePaymentEntryIdPayload(variablePayload);
  await reloadPaymentPage(page,origin);
 
  const beforeEntry=(await page.locator("body").innerText()).slice(0,30000);
@@ -303,8 +307,22 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
  if(minimum!==undefined&&downPayment<minimum)throw new Error(variableEntryError(req.plan,"ENTRY_BELOW_MINIMUM"));
 
  // A linha de entrada recebe um identificador dinâmico a cada simulação.
- const paymentId=paymentIdFromSetup||await readPaymentEntryId(page,origin,req.plan);
- if(!paymentId)throw new Error(variableEntryError(req.plan,"PAYMENT_ID_NOT_FOUND"));
+ const paymentId=paymentIdFromSetup
+  ||paymentIdFromSetupPage
+  ||paymentIdFromVariable
+  ||await readPaymentEntryId(page,origin,req.plan);
+ if(!paymentId){
+  console.error("[credit] nenhuma fonte devolveu o id da entrada",{
+   plan:req.plan,
+   setupBytes:planPayload.length,
+   setupHasForm:/pagamentos_ent/i.test(planPayload),
+   setupHasIdAttribute:/data-(?:cdpagamento|item)/i.test(planPayload),
+   variableBytes:variablePayload.length,
+   variableHasForm:/pagamentos_ent/i.test(variablePayload),
+   variableHasIdAttribute:/data-(?:cdpagamento|item)/i.test(variablePayload)
+  });
+  throw new Error(variableEntryError(req.plan,"PAYMENT_ID_NOT_FOUND"));
+ }
 
  // 3) Preenche a entrada. A chamada abaixo é o evento disparado quando o
  // vendedor clica fora do campo (blur/change) no site da Plataforma Click.

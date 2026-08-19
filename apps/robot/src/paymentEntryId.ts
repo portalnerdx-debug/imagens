@@ -56,9 +56,24 @@ export function parsePaymentEntryIdPayload(payload:string):string|undefined{
 
  try{
   const parsed=JSON.parse(source) as unknown;
-  if(parsed&&typeof parsed==="object"&&"html" in parsed){
-   const html=(parsed as {html?:unknown}).html;
-   if(typeof html==="string")return parsePaymentEntryId(html);
+  const values:unknown[]=[parsed];
+  const visited=new Set<unknown>();
+  for(let depth=0;depth<4&&values.length;depth++){
+   const level=values.splice(0,values.length);
+   for(const value of level){
+    if(value===null||value===undefined||visited.has(value))continue;
+    visited.add(value);
+    if(typeof value==="string"){
+     const id=parsePaymentEntryId(value);
+     if(id)return id;
+     continue;
+    }
+    if(Array.isArray(value)){
+     values.push(...value);
+     continue;
+    }
+    if(typeof value==="object")values.push(...Object.values(value as Record<string,unknown>));
+   }
   }
  }catch{
   // Algumas versões respondem HTML puro; a tentativa direta acima já cobre.

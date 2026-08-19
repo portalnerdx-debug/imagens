@@ -238,6 +238,15 @@ test("captura o id da entrada Cliente Novo 48 direto do JSON observado no HAR 9"
  assert.equal(parsePaymentEntryIdPayload(payload),"12202282");
 });
 
+test("captura o id mesmo quando o HTML vem aninhado em outra chave JSON",()=>{
+ const payload=JSON.stringify({data:{resultado:{conteudo:`
+  <form id="pagamentos_ent">
+   <a class="remove-payment" data-type="E" data-item="12202282">Excluir</a>
+  </form>
+ `}}});
+ assert.equal(parsePaymentEntryIdPayload(payload),"12202282");
+});
+
 test("renova a sessão expirada e repete a operação somente uma vez",async()=>{
  let attempts=0,refreshes=0;
  const result=await runWithSessionRetry(async()=>{
