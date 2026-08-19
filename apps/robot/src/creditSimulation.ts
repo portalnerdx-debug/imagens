@@ -9,7 +9,7 @@ import {
 import {chooseWarrantyHref} from "./warrantySelection.js";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "./warrantyService.js";
 import {parseCartProductCodes} from "./cartCleanup.js";
-import {isPaymentEntryId,parsePaymentEntryId} from "./paymentEntryId.js";
+import {isPaymentEntryId,parsePaymentEntryId,parsePaymentEntryIdPayload} from "./paymentEntryId.js";
 
 export type CreditPlan="48"|"CT1"|"CT2";
 export interface CreditRequest{
@@ -288,6 +288,7 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
   headers,timeout:60000
  });
  if(!plan.ok())throw new Error(variableEntryError(req.plan,"PAYMENT_SETUP_FAILED"));
+ const paymentIdFromSetup=parsePaymentEntryIdPayload(await plan.text());
  await reloadPaymentPage(page,origin);
 
  // 2) Marca Entrada Variável e recarrega, como a interface da Click.
@@ -302,7 +303,7 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
  if(minimum!==undefined&&downPayment<minimum)throw new Error(variableEntryError(req.plan,"ENTRY_BELOW_MINIMUM"));
 
  // A linha de entrada recebe um identificador dinâmico a cada simulação.
- const paymentId=await readPaymentEntryId(page,origin,req.plan);
+ const paymentId=paymentIdFromSetup||await readPaymentEntryId(page,origin,req.plan);
  if(!paymentId)throw new Error(variableEntryError(req.plan,"PAYMENT_ID_NOT_FOUND"));
 
  // 3) Preenche a entrada. A chamada abaixo é o evento disparado quando o

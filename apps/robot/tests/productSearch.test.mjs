@@ -13,7 +13,7 @@ import {
 import {chooseWarrantyHref} from "../src/warrantySelection.ts";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "../src/warrantyService.ts";
 import {clearCreditCart,parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
-import {parsePaymentEntryId} from "../src/paymentEntryId.ts";
+import {parsePaymentEntryId,parsePaymentEntryIdPayload} from "../src/paymentEntryId.ts";
 import {runWithSessionRetry} from "../src/sessionRetry.ts";
 
 const capturedProductText = `
@@ -225,6 +225,19 @@ test("usa data-item longo como alternativa e ignora o código curto da condiçã
  assert.equal(parsePaymentEntryId('<form id="pagamentos_ent"><span data-item="1"></span></form>'),undefined);
 });
 
+test("captura o id da entrada Cliente Novo 48 direto do JSON observado no HAR 9",()=>{
+ const payload=JSON.stringify({html:`
+  <form name="pagamentos_ent" id="pagamentos_ent">
+   <select class="change-payment" data-id="48" data-cdpagamento="12202282"></select>
+   <a class="remove-payment" data-type="E" data-item="12202282">Excluir</a>
+  </form>
+  <form id="pagamentos_parc">
+   <select class="change-payment" data-cdpagamento="12202283"></select>
+  </form>
+ `});
+ assert.equal(parsePaymentEntryIdPayload(payload),"12202282");
+});
+
 test("renova a sessão expirada e repete a operação somente uma vez",async()=>{
  let attempts=0,refreshes=0;
  const result=await runWithSessionRetry(async()=>{
@@ -246,14 +259,11 @@ test("não cria sessão nova para erros que não sejam recuperáveis",async()=>{
  assert.equal(refreshes,0);
 });
 
-test("cria sessão nova quando o carrinho não consegue confirmar zero itens",async()=>{
- let attempts=0,refreshes=0;
- const result=await runWithSessionRetry(async()=>{
-  attempts++;
-  if(attempts===1)throw new Error("CART_CLEANUP_FAILED");
-  return "carrinho novo";
- },async()=>{refreshes++});
- assert.equal(result,"carrinho novo");
- assert.equal(attempts,2);
- assert.equal(refreshes,1);
+test("não tenta recuperar erro de limpeza porque o crediário usa sessão nova",async()=>{
+ let refreshes=0;
+ await assert.rejects(
+  runWithSessionRetry(async()=>{throw new Error("CART_CLEANUP_FAILED")},async()=>{refreshes++}),
+  /CART_CLEANUP_FAILED/
+ );
+ assert.equal(refreshes,0);
 });

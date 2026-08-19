@@ -44,6 +44,28 @@ export function parsePaymentEntryId(html:string):string|undefined{
  return undefined;
 }
 
+/**
+ * A rota que cria a condição 48 devolve JSON e coloca o formulário da entrada
+ * em `html`. No Render esse payload costuma chegar antes de o recarregamento
+ * da página refletir o novo pagamento, portanto ele é a fonte prioritária.
+ */
+export function parsePaymentEntryIdPayload(payload:string):string|undefined{
+ const source=String(payload||"");
+ const direct=parsePaymentEntryId(source);
+ if(direct)return direct;
+
+ try{
+  const parsed=JSON.parse(source) as unknown;
+  if(parsed&&typeof parsed==="object"&&"html" in parsed){
+   const html=(parsed as {html?:unknown}).html;
+   if(typeof html==="string")return parsePaymentEntryId(html);
+  }
+ }catch{
+  // Algumas versões respondem HTML puro; a tentativa direta acima já cobre.
+ }
+ return undefined;
+}
+
 export function isPaymentEntryId(value:string|undefined):value is string{
  return Boolean(validPaymentId(value));
 }
