@@ -59,6 +59,16 @@ test("interpreta o resultado CT1 real devolvido pela tela de pagamento", () => {
   assert.equal(result.total,5928.60);
 });
 
+test("interpreta CT1 quando a coluna Detalhes omite o prefixo monetário",()=>{
+ const result=extractCreditResult(`
+  Forma de Pagto. Valor Opções Detalhes
+  32 - CARNE C/J 5928.60 em 12 x 12x 494,05
+  Total: R$ 5.928,60
+ `,{code:"1032123",plan:"CT1",installments:12});
+ assert.equal(result.installmentValue,494.05);
+ assert.equal(result.total,5928.60);
+});
+
 test("prepara a base tradicional antes de escolher a faixa prestamista",()=>{
  assert.deepEqual(baseRequiredItemsForPlan("CT1").map(({code,quantity})=>({code,quantity})),[
   {code:"447164",quantity:1},
