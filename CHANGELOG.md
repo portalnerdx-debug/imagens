@@ -1,5 +1,17 @@
 # Changelog
 
+## Etapa 8.27 — AJAX de pagamento dentro do navegador
+- As chamadas de pagamento CT1, CT2 e 48 agora são executadas por `fetch` dentro da página autenticada.
+- Cookies, origem, referenciador e cabeçalhos passam a ser os mesmos usados pelo JavaScript da Plataforma Click.
+- Se a primeira inclusão CT2/48 vier vazia, a condição é recriada uma vez e a Entrada Variável é reativada.
+- O diagnóstico informa também se a reconstrução devolveu formulário ou identificador.
+
+## Etapa 8.26 — id da entrada por múltiplas fontes
+- CT2 e Cliente Novo 48 guardam o id na resposta do plano antes de ativar Entrada Variável.
+- O id também é procurado na primeira página recarregada e na resposta da ativação.
+- A leitura final do formulário continua como último fallback.
+- Respostas JSON com HTML aninhado em chaves diferentes também são reconhecidas.
+
 ## Etapa 8.25 — id da entrada Cliente Novo 48 pelo HAR 9
 - O identificador dinâmico da entrada é capturado diretamente do JSON retornado ao criar a condição 48.
 - O campo `html` da resposta é analisado dentro de `pagamentos_ent`, sem confundir a entrada com a parcela financiada.
