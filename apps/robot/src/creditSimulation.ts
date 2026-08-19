@@ -199,13 +199,10 @@ async function simulateCt1(page:Page,req:CreditRequest,context:{
  if(req.installments<1||req.installments>24)throw new Error("CT1_INSTALLMENTS_OUT_OF_RANGE");
 
  const origin=new URL(page.url()).origin;
- const referer=page.url();
- const response=await page.request.get(`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`,{
-  params:{cod_pagto:"CT1",qt_parcelas:String(req.installments),ajax:"1",_:String(Date.now())},
-  headers:{referer,"x-requested-with":"XMLHttpRequest"},
-  timeout:60000
+ const response=await browserAjaxGet(page,`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`,{
+  cod_pagto:"CT1",qt_parcelas:String(req.installments),ajax:"1",_:String(Date.now())
  });
- if(!response.ok())throw new Error("CREDIT_REQUEST_FAILED");
+ if(!response.ok)throw new Error("CREDIT_REQUEST_FAILED");
 
  // O endpoint grava a condição na sessão. O resultado aparece somente depois
  // que carrinho-entrega.php é recarregado, exatamente como observado no HAR.
@@ -232,6 +229,24 @@ async function reloadPaymentPage(page:Page,origin:string){
   waitUntil:"domcontentloaded",timeout:60000
  });
  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+}
+
+/** Executa o mesmo GET AJAX do site dentro da página e da sessão autenticada. */
+async function browserAjaxGet(page:Page,endpoint:string,params:Record<string,string>){
+ return page.evaluate(async({endpoint,params})=>{
+  const url=new URL(endpoint,window.location.href);
+  for(const [key,value] of Object.entries(params))url.searchParams.set(key,value);
+  const response=await fetch(url.toString(),{
+   method:"GET",
+   credentials:"include",
+   cache:"no-store",
+   headers:{
+    "Accept":"application/json, text/javascript, */*; q=0.01",
+    "X-Requested-With":"XMLHttpRequest"
+   }
+  });
+  return {ok:response.ok,status:response.status,text:await response.text(),url:response.url};
+ },{endpoint,params});
 }
 
 async function readPaymentEntryId(page:Page,origin:string,plan:CreditPlan){
@@ -280,25 +295,24 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
  if(!(downPayment>0))throw new Error("ENTRY_REQUIRED");
 
  const origin=new URL(page.url()).origin;
- const headers={referer:page.url(),"x-requested-with":"XMLHttpRequest"};
+ const planEndpoint=`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`;
+ const planParams={cod_pagto:req.plan,qt_parcelas:String(req.installments),ajax:"1",_:String(Date.now())};
 
  // 1) Seleciona a condição e a quantidade total de pagamentos (entrada + parcelas).
- const plan=await page.request.get(`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`,{
-  params:{cod_pagto:req.plan,qt_parcelas:String(req.installments),ajax:"1",_:String(Date.now())},
-  headers,timeout:60000
- });
- if(!plan.ok())throw new Error(variableEntryError(req.plan,"PAYMENT_SETUP_FAILED"));
- const planPayload=await plan.text();
+ const plan=await browserAjaxGet(page,planEndpoint,planParams);
+ if(!plan.ok)throw new Error(variableEntryError(req.plan,"PAYMENT_SETUP_FAILED"));
+ const planPayload=plan.text;
  const paymentIdFromSetup=parsePaymentEntryIdPayload(planPayload);
  await reloadPaymentPage(page,origin);
  const paymentIdFromSetupPage=parsePaymentEntryId(await page.content().catch(()=>""));
 
  // 2) Marca Entrada Variável e recarrega, como a interface da Click.
- const variable=await page.request.get(`${origin}/checkout_catalogo/processa_entrada_variavel_calc_ajax.php`,{
-  params:{cod_pagto:req.plan,_:String(Date.now())},headers,timeout:60000
+ const variableEndpoint=`${origin}/checkout_catalogo/processa_entrada_variavel_calc_ajax.php`;
+ const variable=await browserAjaxGet(page,variableEndpoint,{
+  cod_pagto:req.plan,_:String(Date.now())
  });
- if(!variable.ok())throw new Error(variableEntryError(req.plan,"VARIABLE_ENTRY_FAILED"));
- const variablePayload=await variable.text();
+ if(!variable.ok)throw new Error(variableEntryError(req.plan,"VARIABLE_ENTRY_FAILED"));
+ const variablePayload=variable.text;
  const paymentIdFromVariable=parsePaymentEntryIdPayload(variablePayload);
  await reloadPaymentPage(page,origin);
 
@@ -307,10 +321,23 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
  if(minimum!==undefined&&downPayment<minimum)throw new Error(variableEntryError(req.plan,"ENTRY_BELOW_MINIMUM"));
 
  // A linha de entrada recebe um identificador dinâmico a cada simulação.
- const paymentId=paymentIdFromSetup
+ let paymentId=paymentIdFromSetup
   ||paymentIdFromSetupPage
   ||paymentIdFromVariable
   ||await readPaymentEntryId(page,origin,req.plan);
+ let rebuiltPayload="";
+ if(!paymentId){
+  // Algumas sessões devolvem vazio na primeira inclusão. Refazemos a condição
+  // uma única vez dentro do navegador e reativamos a entrada antes de desistir.
+  const rebuilt=await browserAjaxGet(page,planEndpoint,{...planParams,_:String(Date.now())});
+  if(rebuilt.ok){
+   rebuiltPayload=rebuilt.text;
+   paymentId=parsePaymentEntryIdPayload(rebuiltPayload);
+   await browserAjaxGet(page,variableEndpoint,{cod_pagto:req.plan,_:String(Date.now())});
+   await reloadPaymentPage(page,origin);
+   paymentId=paymentId||parsePaymentEntryId(await page.content().catch(()=>""));
+  }
+ }
  if(!paymentId){
   console.error("[credit] nenhuma fonte devolveu o id da entrada",{
    plan:req.plan,
@@ -319,18 +346,20 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{
    setupHasIdAttribute:/data-(?:cdpagamento|item)/i.test(planPayload),
    variableBytes:variablePayload.length,
    variableHasForm:/pagamentos_ent/i.test(variablePayload),
-   variableHasIdAttribute:/data-(?:cdpagamento|item)/i.test(variablePayload)
+   variableHasIdAttribute:/data-(?:cdpagamento|item)/i.test(variablePayload),
+   rebuiltBytes:rebuiltPayload.length,
+   rebuiltHasForm:/pagamentos_ent/i.test(rebuiltPayload),
+   rebuiltHasIdAttribute:/data-(?:cdpagamento|item)/i.test(rebuiltPayload)
   });
   throw new Error(variableEntryError(req.plan,"PAYMENT_ID_NOT_FOUND"));
  }
 
  // 3) Preenche a entrada. A chamada abaixo é o evento disparado quando o
  // vendedor clica fora do campo (blur/change) no site da Plataforma Click.
- const entry=await page.request.get(`${origin}/checkout_catalogo/processa_inclui_pagamento_variavel_ajax.php`,{
-  params:{cd_pagamento:paymentId,valor:formatBrazilianMoney(downPayment),_:String(Date.now())},
-  headers,timeout:60000
+ const entry=await browserAjaxGet(page,`${origin}/checkout_catalogo/processa_inclui_pagamento_variavel_ajax.php`,{
+  cd_pagamento:paymentId,valor:formatBrazilianMoney(downPayment),_:String(Date.now())
  });
- if(!entry.ok())throw new Error(variableEntryError(req.plan,"VARIABLE_ENTRY_FAILED"));
+ if(!entry.ok)throw new Error(variableEntryError(req.plan,"VARIABLE_ENTRY_FAILED"));
  await reloadPaymentPage(page,origin);
 
  const text=(await page.locator("body").innerText()).slice(0,40000);
