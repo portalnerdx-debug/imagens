@@ -1,11 +1,23 @@
 # Changelog
 
-## Etapa 8.23 — login e limpeza resilientes no Render
-- O login automático agora aguarda até 20 segundos pela conclusão, contempla campos em iframe e reconhece mais nomes de usuário e botões de envio.
-- Uma página sem formulário e sem sinal de autenticação não é mais gravada como se fosse uma sessão válida.
-- Se a exclusão AJAX responder com sucesso sem remover o item, o robô abre o carrinho e aciona o botão real `.link-excluir` como segunda estratégia.
-- O carrinho só é considerado vazio com contador zero ou mensagem explícita de vazio; contador ausente deixou de produzir confirmação falsa.
-- A leitura de `CarrinhoNumItens` aceita números dentro de tags internas e atributos de contagem.
+## Etapa 8.25 — id da entrada Cliente Novo 48 pelo HAR 9
+- O identificador dinâmico da entrada é capturado diretamente do JSON retornado ao criar a condição 48.
+- O campo `html` da resposta é analisado dentro de `pagamentos_ent`, sem confundir a entrada com a parcela financiada.
+- O recarregamento da página permanece como alternativa para outras versões da Plataforma Click.
+- O valor continua sendo enviado ao `processa_inclui_pagamento_variavel_ajax.php` com o id real da consulta atual.
+
+## Etapa 8.24 — novo login em cada consulta de crediário
+- Cada simulação de crediário cria uma sessão Click nova antes de começar.
+- A tentativa de zerar o carrinho anterior foi removida do fluxo de simulação.
+- Pesquisa de produtos continua usando a sessão reaproveitável existente.
+- Se a sessão nova expirar durante a consulta, ocorre somente uma repetição.
+- Cookies e arquivos de autenticação não fazem parte do pacote de entrega.
+
+## Etapa 8.23 — login automático compatível com a Click
+- O renovador envia o login ao endpoint AJAX real da Plataforma Click.
+- A resposta do servidor é aguardada e validada antes de salvar a sessão.
+- Códigos de sucesso `0` e `101` são aceitos; troca obrigatória de senha é identificada separadamente.
+- O retry único e a ordem de limpeza do carrinho da etapa 8.22 foram preservados.
 
 ## Etapa 8.22 — pagamento resetado antes do carrinho
 - A condição de pagamento e a entrada da consulta anterior são resetadas antes de qualquer exclusão de produto.
