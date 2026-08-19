@@ -10,7 +10,7 @@ import {
  baseRequiredItemsForPlan,ct1RequiredItems,PRESTAMISTA_CODES,
  prestamistaItemForTotal,requiredItemsForPlan
 } from "../src/ct1CartRules.ts";
-import {chooseWarrantyHref} from "../src/warrantySelection.ts";
+import {chooseWarrantyHref,warrantyOptionCode} from "../src/warrantySelection.ts";
 import {parseWarrantyCartTotal,warrantyServiceCode} from "../src/warrantyService.ts";
 import {clearCreditCart,parseCartItemCount,parseCartProductCodes} from "../src/cartCleanup.ts";
 import {parsePaymentEntryId,parsePaymentEntryIdPayload} from "../src/paymentEntryId.ts";
@@ -114,6 +114,13 @@ test("seleciona o link real da garantia adicional",()=>{
  ];
  assert.match(chooseWarrantyHref(hrefs,true),/op_garantia=831055/);
  assert.match(chooseWarrantyHref(hrefs,false),/op_garantia=0$/);
+});
+
+test("usa o código dinâmico da garantia de 12 meses",()=>{
+ const href="/checkout_catalogo/carrinho.php?cod=412100&acao=incluir&op_garantia=841955";
+ assert.equal(warrantyOptionCode(href),"841955");
+ assert.equal(warrantyServiceCode(true,"841955"),"841955");
+ assert.equal(warrantyServiceCode(false,"841955"),"0");
 });
 
 test("confirma o serviço de garantia usado no carrinho",()=>{
