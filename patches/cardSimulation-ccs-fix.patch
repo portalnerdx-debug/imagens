@@ -1,0 +1,60 @@
+*** Begin Patch
+*** Update File: apps/robot/src/cardSimulation.ts
+@@
+-async function configureCCSPayment(page:Page,installments:number){
+-  if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+-  const setup=await setupPayment(page,"CCS",installments);
+-  let html=setup;
+-  try{html=JSON.parse(setup)?.html||setup}catch{}
+-  let parsed=parseCardDetails(html,"CCS");
+-  if(parsed.installmentValue===undefined){
+-    await reloadCart(page);
+-    parsed=parseCardDetails(await page.content(),"CCS");
+-  }
+-  if(parsed.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
+-  return {installmentValue:parsed.installmentValue,total:parsed.total};
+-}
++function parseCCSResult(raw:string,installments:number){
++  let html=raw;
++  try{
++    const payload=JSON.parse(raw);
++    html=typeof payload?.html==="string"?payload.html:raw;
++  }catch{}
++  html=html.replace(/\\"/g,'"');
++
++  const rows=[...html.matchAll(/<tr[^>]*>([\\s\\S]*?)<\\/tr>/gi)].map(m=>m[1]);
++  const targetRows=rows.filter(row=>
++    /200\\s*-\\s*T\\s+CREDITO/i.test(row) &&
++    /class=["'][^"']*col-detalhes[^"']*["']/i.test(row)
++  );
++
++  for(const row of [...targetRows,...rows]){
++    const detail=row.match(/class=["'][^"']*col-detalhes[^"']*["'][^>]*>[\\s\\S]*?(\\d+)\\s*x\\s*(?:R\\$)?\\s*([\\d.,]+)[\\s\\S]*?<\\/td>/i);
++    if(!detail)continue;
++    if(Number(detail[1])!==installments)continue;
++    const installmentValue=parseMoney(detail[2]);
++    if(installmentValue===undefined)continue;
++    const total=parseMoney(row.match(/valor-total[^>]*>[\\s\\S]*?R\\$\\s*([\\d.,]+)/i)?.[1])
++      ?? parseMoney(html.match(/valor-total[^>]*>[\\s\\S]*?R\\$\\s*([\\d.,]+)/i)?.[1]);
++    return {installmentValue,total};
++  }
++
++  const direct=[...html.matchAll(/class=["'][^"']*col-detalhes[^"']*["'][^>]*>[\\s\\S]*?(\\d+)\\s*x\\s*(?:R\\$)?\\s*([\\d.,]+)[\\s\\S]*?<\\/td>/gi)]
++    .map(m=>({count:Number(m[1]),installmentValue:parseMoney(m[2])}))
++    .find(x=>x.count===installments&&x.installmentValue!==undefined);
++  return direct?{installmentValue:direct.installmentValue,total:undefined}:undefined;
++}
++
++async function configureCCSPayment(page:Page,installments:number){
++  if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
++
++  const setup=await setupPayment(page,"CCS",installments);
++  let parsed=parseCCSResult(setup,installments);
++  if(!parsed?.installmentValue){
++    await reloadCart(page);
++    parsed=parseCCSResult(await page.content(),installments);
++  }
++  if(!parsed?.installmentValue)throw new Error("CARD_RESULT_NOT_PARSED");
++  return {installmentValue:parsed.installmentValue,total:parsed.total};
++}
+*** End Patch
