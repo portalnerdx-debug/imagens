@@ -47,11 +47,12 @@ export function simulateClickCredit(input:{
 }
 
 export type ClickCardResult={
- ok:boolean;productCode:string;installments:number;installmentValue?:number;total?:number;
- voltage?:string;message?:string;status?:string;safeStop?:string;
+ ok:boolean;productCode:string;plan:"CCS"|"CCC";installments:number;entry?:number;
+ installmentValue?:number;total?:number;voltage?:string;cardForm?:string;brand?:string;
+ message?:string;status?:string;safeStop?:string;
 };
 export function simulateClickCard(input:{
- productCode:string;installments:number;voltage?:string;cpf?:string;
+ productCode:string;plan:"CCS"|"CCC";installments:number;entry?:number;voltage?:string;cpf?:string;
 }){
  return request<ClickCardResult>("/api/card/simulate",{method:"POST",body:JSON.stringify(input)});
 }
