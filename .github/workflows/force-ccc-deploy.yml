@@ -17,7 +17,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          Path('VERSION').write_text('1.0.29-etapa8.48-force-ccc\n', encoding='utf-8')
+          Path('VERSION').write_text('1.0.35-etapa8.54-force-ccc\n', encoding='utf-8')
           PY
       - name: Commit force deploy
         run: |
