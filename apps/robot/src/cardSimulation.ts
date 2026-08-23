@@ -37,24 +37,17 @@ async function chooseVoltageIfRequested(page:Page,voltage?:string){
 async function enterCpf(page:Page,cpf:string){
   const origin=new URL(page.url()).origin;
   const response=await page.request.post(`${origin}/checkout_catalogo/processa_loginc.php`,{
-    params:{tp_pessoa:"PF"},
-    form:{nr_documento:cpf},
-    headers:{referer:page.url(),origin},
-    timeout:60000
+    params:{tp_pessoa:"PF"},form:{nr_documento:cpf},headers:{referer:page.url(),origin},timeout:60000
   });
   if(!response.ok())throw new Error("CARD_CPF_SUBMIT_FAILED");
-  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{
-    waitUntil:"domcontentloaded",timeout:60000
-  });
+  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
   await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 }
 
 async function includeProductWithoutWarranty(page:Page,code:string){
   const origin=new URL(page.url()).origin;
   const url=new URL("/checkout_catalogo/carrinho.php",origin);
-  url.searchParams.set("cod",code);
-  url.searchParams.set("acao","incluir");
-  url.searchParams.set("op_garantia","0");
+  url.searchParams.set("cod",code);url.searchParams.set("acao","incluir");url.searchParams.set("op_garantia","0");
   await page.goto(url.toString(),{waitUntil:"domcontentloaded",timeout:60000});
   await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 }
@@ -65,172 +58,166 @@ function parseMoney(value:string|undefined){
   return Number.isFinite(n)?n:undefined;
 }
 
+function cleanHtml(html:string){
+  return html.replace(/\\"/g,'"').replace(/&nbsp;/gi," ");
+}
+
 function parsePaymentRows(html:string){
   const rows:Array<{id?:string;details?:string;value?:number;form?:string;conveniada?:string}>=[];
-  const rowRegex=/<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  for(const rowMatch of html.matchAll(rowRegex)){
-    const row=rowMatch[1];
+  for(const m of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)){
+    const row=m[1];
     if(!/remove-payment/i.test(row))continue;
-    const id=row.match(/remove-payment[^>]*data-item=["'](\d+)["']/i)?.[1];
-    const value=parseMoney(row.match(/class=["']valor["'][^>]*value=["']([^"']+)["']/i)?.[1]
-      ?? row.match(/name=["']valor_(?:ent|parc)\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
-    const details=row.match(/class=["']col-detalhes["'][^>]*>([\s\S]*?)<\/td>/i)?.[1]
-      ?.replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/\s+/g," ").trim();
-    const form=row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected(?:=['"][^"']*['"])?[^>]*>/i)?.[1];
-    const conv=row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected(?:=['"][^"']*['"])?[^>]*>/i)?.[1];
-    rows.push({id,details,value,form,conveniada:conv});
+    const id=row.match(/remove-payment[\s\S]*?data-item=["'](\d+)["']/i)?.[1];
+    if(!id)continue;
+    const value=parseMoney(row.match(/class=["']valor["'][^>]*value=["']([^"']+)["']/i)?.[1]??row.match(/name=["']valor_(?:ent|parc)\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+    const details=row.match(/class=["']col-detalhes["'][^>]*>([\s\S]*?)<\/td>/i)?.[1]?.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
+    const form=row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected/i)?.[1]??row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*selected[^>]*value=['"](\d+)['"]/i)?.[1];
+    const conveniada=row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected/i)?.[1]??row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*selected[^>]*value=['"](\d+)['"]/i)?.[1];
+    rows.push({id,details,value,form,conveniada});
   }
   return rows;
 }
 
 function parseCardDetails(html:string,plan:CardPlan){
-  const rows=parsePaymentRows(html);
-  const entryRow=rows.find(r=>r.form==="1" || (!!r.id && /1x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||"")));
-  const parcelRow=rows.find(r=>
-    r.form==="200" ||
-    (plan==="CCC" && r.conveniada==="3") ||
-    (plan==="CCS" && /\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||"") && r.form!=="1")
-  );
+  const source=cleanHtml(html);
+  const rows=parsePaymentRows(source);
+  const entryRow=rows.find(r=>r.form==="1"||/entrada/i.test(r.details||""));
+  const parcelRow=rows.find(r=>r.form==="200")??rows.find(r=>plan==="CCC"&&r.conveniada==="3")??rows.find(r=>r.details&&/\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details));
   const detail=parcelRow?.details||"";
   const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
   const installmentValue=parseMoney(match?.[2]);
-
-  const parcelTotalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*Total\s+Parcelas:\s*R\$?\s*([\d.,]+)/i);
-  const entryTotalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*Total\s+Entrada:\s*R\$?\s*([\d.,]+)/i);
-  const genericTotalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*(?:Total\s*)?R\$?\s*([\d.,]+)/i);
-  const parcelTotal=parseMoney(parcelTotalMatch?.[1]);
-  const entryTotal=parseMoney(entryTotalMatch?.[1]);
-  const genericTotal=parseMoney(genericTotalMatch?.[1]);
-  const total=plan==="CCC"
-    ? ((entryTotal??entryRow?.value??0)+(parcelTotal??(genericTotal!==undefined&&entryTotal===undefined?genericTotal:0)) || undefined)
-    : (genericTotal??parcelTotal);
-  const valueParc=parseMoney(html.match(/name=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
-  const resolvedInstallmentValue=installmentValue ?? (valueParc!==undefined && match?.[1] ? valueParc/Number(match[1]) : undefined);
-  return {
-    installmentValue:resolvedInstallmentValue,total,details:detail,
-    entry:entryRow?.value,entryPaymentId:entryRow?.id,parcelPaymentId:parcelRow?.id,
-    parcelPaymentForm:parcelRow?.form,conveniada:parcelRow?.conveniada,
-    mastercardSelected:/<option[^>]*value=['"]3['"][^>]*selected/i.test(html)
-  };
+  const parcelTotal=parseMoney(source.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>[\s\S]*?Total\s+Parcelas:\s*R\$?\s*([\d.,]+)/i)?.[1]);
+  const genericTotal=parseMoney(source.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*(?:Total\s*)?R\$?\s*([\d.,]+)/i)?.[1]);
+  const valueParc=parseMoney(source.match(/(?:id|name)=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+  const total=plan==="CCC"?(entryRow?.value??0)+(parcelTotal??valueParc??0):(genericTotal??parcelTotal);
+  return {installmentValue,total:total||undefined,details:detail,entry:entryRow?.value,entryPaymentId:entryRow?.id,parcelPaymentId:parcelRow?.id,parcelPaymentForm:parcelRow?.form,conveniada:parcelRow?.conveniada,mastercardSelected:/<option[^>]*value=['"]3['"][^>]*selected/i.test(source)};
 }
-async function configureCCSPayment(page:Page,installments:number){
-  if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+
+async function getText(page:Page,path:string,params:Record<string,string>){
   const origin=new URL(page.url()).origin;
-  const endpoint=`${origin}/checkout_catalogo/processa_inclui_pagamento_ajax.php`;
-  const result=await page.evaluate(async({endpoint,installments})=>{
-    const url=new URL(endpoint,window.location.href);
-    url.searchParams.set("cod_pagto","CCS");
-    url.searchParams.set("qt_parcelas",String(installments));
-    url.searchParams.set("ajax","1");
-    url.searchParams.set("_",String(Date.now()));
+  return page.evaluate(async({origin,path,params})=>{
+    const url=new URL(path,origin);Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
     const response=await fetch(url.toString(),{credentials:"include",cache:"no-store",headers:{"Accept":"application/json, text/javascript, */*; q=0.01","X-Requested-With":"XMLHttpRequest"}});
-    return {ok:response.ok,text:await response.text()};
-  },{endpoint,installments});
+    return {ok:response.ok,status:response.status,text:await response.text()};
+  },{origin,path,params});
+}
+
+async function setupPayment(page:Page,plan:CardPlan,qtParcelas:number){
+  const result=await getText(page,"/checkout_catalogo/processa_inclui_pagamento_ajax.php",{cod_pagto:plan,qt_parcelas:String(qtParcelas),ajax:"1",_:String(Date.now())});
   if(!result.ok)throw new Error("CARD_PAYMENT_SETUP_FAILED");
-  let html="";
-  try{const payload=JSON.parse(result.text);html=typeof payload?.html==="string"?payload.html:result.text;}catch{html=result.text;}
-  let parsed=parseCardDetails(html,"CCS");
-  if(parsed.installmentValue===undefined){
-    await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
-    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
-    parsed=parseCardDetails(await page.content(),"CCS");
-  }
-  if(parsed.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
-  return parsed;
+  return result.text;
 }
 
 async function activateVariableEntry(page:Page){
-  const origin=new URL(page.url()).origin;
-  const result=await page.evaluate(async({origin})=>{
-    const url=new URL("/checkout_catalogo/processa_entrada_variavel_calc_ajax.php",origin);
-    url.searchParams.set("cod_pagto","CCC");
-    url.searchParams.set("_",String(Date.now()));
-    const response=await fetch(url.toString(),{credentials:"include",cache:"no-store",headers:{"Accept":"application/json, text/javascript, */*; q=0.01","X-Requested-With":"XMLHttpRequest"}});
-    return {ok:response.ok,text:await response.text()};
-  },{origin});
+  const result=await getText(page,"/checkout_catalogo/processa_entrada_variavel_calc_ajax.php",{cod_pagto:"CCC",_:String(Date.now())});
   if(!result.ok)throw new Error("CARD_VARIABLE_ENTRY_FAILED");
-  try{return JSON.parse(result.text);}catch{return result.text;}
+  return result.text;
+}
+
+async function setVariableEntry(page:Page,paymentId:string,entry:number){
+  const result=await getText(page,"/checkout_catalogo/processa_inclui_pagamento_variavel_ajax.php",{cd_pagamento:paymentId,valor:String(entry),_:String(Date.now())});
+  if(!result.ok)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+  return result.text;
 }
 
 async function includePayment2(page:Page,params:Record<string,string>){
-  const origin=new URL(page.url()).origin;
-  return page.evaluate(async({origin,params})=>{
-    const url=new URL("/checkout_catalogo/processa_inclui_pagamento2_ajax.php",origin);
-    Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
-    const response=await fetch(url.toString(),{credentials:"include",cache:"no-store",headers:{"Accept":"application/json, text/javascript, */*; q=0.01","X-Requested-With":"XMLHttpRequest"}});
-    return {ok:response.ok,status:response.status,text:await response.text()};
-  },{origin,params});
+  const result=await getText(page,"/checkout_catalogo/processa_inclui_pagamento2_ajax.php",params);
+  if(!result.ok)throw new Error("CARD_PAYMENT_UPDATE_FAILED");
+  return result.text;
+}
+
+async function setMastercard(page:Page,paymentId:string){
+  await getText(page,"/checkout_catalogo/processa_conveniada_ajax.php",{cd_conveniada:"3",cd_pagamento:paymentId,prevent_cache:new Date().toString(),_:String(Date.now())});
 }
 
 async function blockEntryEditing(page:Page){
+  await getText(page,"/checkout_catalogo/processa_liberar_entradas_ajax.php",{acao:"bloquear_entradas",prevent_cache:String(Date.now()),_:String(Date.now())});
+}
+
+async function reloadCart(page:Page){
   const origin=new URL(page.url()).origin;
-  await page.evaluate(async({origin})=>{
-    const url=new URL("/checkout_catalogo/processa_liberar_entradas_ajax.php",origin);
-    url.searchParams.set("acao","bloquear_entradas");
-    url.searchParams.set("prevent_cache",String(Date.now()));
-    url.searchParams.set("_",String(Date.now()));
-    await fetch(url.toString(),{credentials:"include",cache:"no-store",headers:{"X-Requested-With":"XMLHttpRequest"}});
-  },{origin});
+  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
+  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+}
+
+function parseCCSResult(raw:string,installments:number){
+  let html=raw;try{const payload=JSON.parse(raw);html=typeof payload?.html==="string"?payload.html:raw;}catch{}
+  html=cleanHtml(html);
+  for(const row of [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map(m=>m[1])){
+    if(!/200\s*-\s*T\s*CREDITO/i.test(row))continue;
+    const detail=row.match(/class=["'][^"']*col-detalhes[^"']*["'][^>]*>[\s\S]*?(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)[\s\S]*?<\/td>/i);
+    if(!detail||Number(detail[1])!==installments)continue;
+    const installmentValue=parseMoney(detail[2]);if(installmentValue===undefined)continue;
+    const total=parseMoney(row.match(/valor-total[^>]*>[\s\S]*?R\$\s*([\d.,]+)/i)?.[1]??html.match(/valor-total[^>]*>[\s\S]*?R\$\s*([\d.,]+)/i)?.[1]);
+    return {installmentValue,total};
+  }
+  const direct=[...html.matchAll(/class=["'][^"']*col-detalhes[^"']*["'][^>]*>[\s\S]*?(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)[\s\S]*?<\/td>/gi)].map(m=>({count:Number(m[1]),installmentValue:parseMoney(m[2])})).find(x=>x.count===installments&&x.installmentValue!==undefined);
+  return direct?{installmentValue:direct.installmentValue,total:undefined}:undefined;
+}
+
+async function configureCCSPayment(page:Page,installments:number){
+  if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+  const setup=await setupPayment(page,"CCS",installments);
+  let parsed=parseCCSResult(setup,installments);
+  if(!parsed?.installmentValue){await reloadCart(page);parsed=parseCCSResult(await page.content(),installments);}
+  if(!parsed?.installmentValue)throw new Error("CARD_RESULT_NOT_PARSED");
+  return parsed;
 }
 
 async function configureCCCWithEntry(page:Page,installments:number,entry:number){
   if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
   if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
-  const origin=new URL(page.url()).origin;
-  const setup=await page.evaluate(async({origin,installments})=>{
-    const url=new URL("/checkout_catalogo/processa_inclui_pagamento_ajax.php",origin);
-    url.searchParams.set("cod_pagto","CCC");url.searchParams.set("qt_parcelas",String(installments));url.searchParams.set("ajax","1");url.searchParams.set("_",String(Date.now()));
-    const response=await fetch(url.toString(),{credentials:"include",cache:"no-store",headers:{"Accept":"application/json, text/javascript, */*; q=0.01","X-Requested-With":"XMLHttpRequest"}});
-    return {ok:response.ok,text:await response.text()};
-  },{origin,installments});
-  if(!setup.ok)throw new Error("CARD_PAYMENT_SETUP_FAILED");
+
+  // HAR real: 10 parcelas + 1 entrada => qt_parcelas=11.
+  const totalPayments=installments+1;
+  const setup=await setupPayment(page,"CCC",totalPayments);
+  let setupHtml=setup;try{setupHtml=JSON.parse(setup)?.html||setup}catch{}
+  const setupIds=[...cleanHtml(setupHtml).matchAll(/data-cdpagamento=["'](\d+)["']/gi)].map(m=>m[1]);
+
   await activateVariableEntry(page);
-  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
-  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+  await reloadCart(page);
 
   let state=parseCardDetails(await page.content(),"CCC");
-  if(!state.entryPaymentId||!state.parcelPaymentId){
-    await activateVariableEntry(page);
-    await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
-    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
-    state=parseCardDetails(await page.content(),"CCC");
-  }
-  if(!state.entryPaymentId||!state.parcelPaymentId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+  const entryId=state.entryPaymentId||setupIds[0];
+  const parcelIdHint=state.parcelPaymentId||setupIds[1];
+  if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  const entryValue=entry.toFixed(2).replace(".",",");
-  const entryResult=await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:state.entryPaymentId,cod_formpagto:"1",tipo_pagto:"P",valor_pagamento:entryValue,_:String(Date.now())});
-  if(!entryResult.ok)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+  // HAR real: grava primeiro o valor da entrada na condição variável.
+  await setVariableEntry(page,entryId,entry);
+  await reloadCart(page);
+  state=parseCardDetails(await page.content(),"CCC");
+
+  // Depois transforma a entrada em DINHEIRO (cod_formpagto=1).
+  const entryResult=await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:state.entryPaymentId||entryId,cod_formpagto:"1",tipo_pagto:"P",valor_pagamento:entry.toFixed(2).replace(".",","),_:String(Date.now())});
+  if(!entryResult)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
   await blockEntryEditing(page);
+  await reloadCart(page);
 
-  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
-  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
   const htmlAfterEntry=await page.content();
   state=parseCardDetails(htmlAfterEntry,"CCC");
-  const parcelId=state.parcelPaymentId;
+  const parcelId=state.parcelPaymentId||parcelIdHint;
   if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
-  const parcelBase=parseMoney(htmlAfterEntry.match(/id=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
-  const financedAmount=parcelBase ?? Math.max(0,(state.total||0)-entry);
-  const parcelResult=await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:parcelId,cod_formpagto:"200",valor_pagamento:financedAmount.toFixed(2).replace(".",","),_:String(Date.now())});
-  if(!parcelResult.ok)throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
 
-  await page.evaluate(async({origin,parcelId})=>{
-    const url=new URL("/checkout_catalogo/processa_conveniada_ajax.php",origin);
-    url.searchParams.set("cd_conveniada","3");url.searchParams.set("cd_pagamento",parcelId);url.searchParams.set("prevent_cache",new Date().toString());url.searchParams.set("_",String(Date.now()));
-    await fetch(url.toString(),{credentials:"include",cache:"no-store",headers:{"X-Requested-With":"XMLHttpRequest"}});
-  },{origin,parcelId});
+  const financedAmount=parseMoney(htmlAfterEntry.match(/(?:id|name)=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1])??state.total??0;
+  if(!(financedAmount>0))throw new Error("CARD_RESULT_NOT_PARSED");
 
-  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
-  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+  // Parcelas: 200 - T CREDITO.
+  await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:parcelId,cod_formpagto:"200",valor_pagamento:financedAmount.toFixed(2).replace(".",","),_:String(Date.now())});
+
+  // Bandeira: Mastercard = 3. A resposta deste endpoint pode conter texto de erro;
+  // o estado persistido no carrinho é a fonte da verdade.
+  await setMastercard(page,parcelId);
+  await reloadCart(page);
+
   let final=parseCardDetails(await page.content(),"CCC");
-  for(let attempt=0;attempt<4;attempt++){
-    if(final.installmentValue!==undefined && final.parcelPaymentForm==="200" && final.conveniada==="3" && final.mastercardSelected)break;
+  for(let attempt=0;attempt<5;attempt++){
+    if(final.installmentValue!==undefined&&final.parcelPaymentId===parcelId&&final.parcelPaymentForm==="200"&&final.conveniada==="3"&&final.mastercardSelected)break;
     await page.waitForTimeout(500);
-    await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
-    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+    await reloadCart(page);
     final=parseCardDetails(await page.content(),"CCC");
   }
-  if(final.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
-  return {...final,entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD",plan:"CCC"};
+  if(final.installmentValue===undefined||final.parcelPaymentForm!=="200"||final.conveniada!=="3")throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+  return {installmentValue:final.installmentValue,total:entry+(final.total??financedAmount),entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD"};
 }
 
 export async function simulateCard(page:Page,req:CardRequest){
@@ -239,6 +226,7 @@ export async function simulateCard(page:Page,req:CardRequest){
   if(!Number.isInteger(req.installments)||req.installments<1||req.installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
   const cpf=(req.cpf||CLICK_DEFAULT_CPF).replace(/\D/g,"");
   if(cpf.length!==11)throw new Error("CPF_REQUIRED");
+
   const product=await searchProduct(page,req.code);
   if(!product.found)throw new Error("PRODUCT_NOT_FOUND");
   const codeMatch=page.getByText(req.code,{exact:false}).first();
