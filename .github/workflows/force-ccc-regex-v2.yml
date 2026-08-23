@@ -1,0 +1,41 @@
+name: Force CCC regex v2
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'force CCC regex v2')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix only CCC regexes
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('apps/robot/src/cardSimulation.ts')
+          s = p.read_text(encoding='utf-8')
+
+          fixes = {
+            r'/^\\d{5,}$/': r'/^\d{5,}$/',
+            r'/T\\s*CREDITO/i': r'/T\s*CREDITO/i',
+            r'/data-cdpagamento=["\'](\\d+)["\']/gi': r'/data-cdpagamento=["\'](\d+)["\']/gi',
+            r'/(?:id|name)=["\']valor_parc\\[\\]["\']/i': r'/(?:id|name)=["\']valor_parc\[\]["\']/i',
+          }
+          for old, new in fixes.items():
+            s = s.replace(old, new)
+
+          p.write_text(s, encoding='utf-8')
+          Path('VERSION').write_text('1.0.32-etapa8.51-ccc-regex-final\n', encoding='utf-8')
+
+      - name: Commit final CCC regex correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/force-ccc-regex-v2.yml
+          git commit -m "force CCC regex v2"
+          git push
