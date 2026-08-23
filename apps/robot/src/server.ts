@@ -4,6 +4,7 @@ import {ALLOWED_ORIGINS,CLICK_BASE_URL,PORT} from "./config.js";
 import {refreshClickSession,withAuthenticatedClickPage,withFreshClickPage} from "./browser.js";
 import {searchProduct} from "./productSearch.js";
 import {simulateCredit} from "./creditSimulation.js";
+import {simulateCard} from "./cardSimulation.js";
 import {verifyFirebaseBearer} from "./firebaseAuth.js";
 
 const app=express();
@@ -35,7 +36,8 @@ function publicError(e:unknown){
   "CPF_REQUIRED","CPF_FIELD_NOT_FOUND","CHECKOUT_ADVANCE_NOT_FOUND","CREDIT_OPTION_NOT_FOUND","CREDIT_PLAN_NOT_FOUND","INSTALLMENTS_FIELD_NOT_FOUND","ENTRY_REQUIRED","ENTRY_FIELD_NOT_FOUND",
   "CT1_INSTALLMENTS_OUT_OF_RANGE","CREDIT_REQUEST_FAILED","CREDIT_RESULT_NOT_PARSED","CT1_PRODUCT_PRICE_REQUIRED","CT1_CART_PREPARATION_FAILED","TRADITIONAL_PRODUCT_PRICE_REQUIRED","TRADITIONAL_CART_PREPARATION_FAILED",
   "TRADITIONAL_CART_TOTAL_REQUIRED","PRESTAMISTA_BAND_SETUP_FAILED","CPF_SUBMIT_FAILED","WARRANTY_SERVICE_FAILED","CT2_INSTALLMENTS_OUT_OF_RANGE","CT2_PAYMENT_SETUP_FAILED","CT2_VARIABLE_ENTRY_FAILED","CT2_PAYMENT_ID_NOT_FOUND","CT2_ENTRY_BELOW_MINIMUM",
-  "48_INSTALLMENTS_OUT_OF_RANGE","48_PAYMENT_SETUP_FAILED","48_VARIABLE_ENTRY_FAILED","48_PAYMENT_ID_NOT_FOUND","48_ENTRY_BELOW_MINIMUM","NEW_CUSTOMER_CART_CLEANUP_FAILED","CART_CLEANUP_FAILED","AUXILIARY_QUANTITY_INVALID"
+  "48_INSTALLMENTS_OUT_OF_RANGE","48_PAYMENT_SETUP_FAILED","48_VARIABLE_ENTRY_FAILED","48_PAYMENT_ID_NOT_FOUND","48_ENTRY_BELOW_MINIMUM","NEW_CUSTOMER_CART_CLEANUP_FAILED","CART_CLEANUP_FAILED","AUXILIARY_QUANTITY_INVALID",
+  "CARD_VOLTAGE_REQUIRED","CARD_VOLTAGE_OPTION_NOT_FOUND","CARD_CPF_SUBMIT_FAILED","CARD_INSTALLMENTS_OUT_OF_RANGE","CARD_PAYMENT_SETUP_FAILED","CARD_RESULT_NOT_PARSED"
  ]);
  return known.has(m)?m:"AUTOMATION_FAILED";
 }
@@ -74,6 +76,23 @@ app.post("/api/credit/simulate",auth,async(req,res)=>{
   console.error("[POST /api/credit/simulate]",e);
   const error=publicError(e);
   res.status(["VOLTAGE_REQUIRED","CPF_REQUIRED","ENTRY_REQUIRED","CT1_INSTALLMENTS_OUT_OF_RANGE","CT2_INSTALLMENTS_OUT_OF_RANGE","CT2_ENTRY_BELOW_MINIMUM","48_INSTALLMENTS_OUT_OF_RANGE","48_ENTRY_BELOW_MINIMUM","AUXILIARY_QUANTITY_INVALID"].includes(error)?400:500).json({error});
+ }
+});
+
+app.post("/api/card/simulate",auth,async(req,res)=>{
+ const body=req.body||{};
+ const request={
+  code:String(body.productCode||body.code||"").trim(),
+  installments:Number(body.installments),
+  cpf:body.cpf?String(body.cpf):undefined,
+  voltage:body.voltage?String(body.voltage):undefined
+ };
+ try{
+  res.json(await withFreshClickPage(page=>simulateCard(page,request)));
+ }catch(e){
+  console.error("[POST /api/card/simulate]",e);
+  const error=publicError(e);
+  res.status(["PRODUCT_CODE_REQUIRED","CPF_REQUIRED","CARD_VOLTAGE_REQUIRED","CARD_INSTALLMENTS_OUT_OF_RANGE"].includes(error)?400:500).json({error});
  }
 });
 
