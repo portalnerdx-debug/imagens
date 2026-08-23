@@ -1,0 +1,78 @@
+name: fix-ccs
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-ccs.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch CCS parser
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('apps/robot/src/cardSimulation.ts')
+          s=p.read_text()
+          new=r'''async function configureCCSPayment(page:Page,installments:number){
+  if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+  const setup=await setupPayment(page,"CCS",installments);
+  let html=setup;
+  try{
+    const payload=JSON.parse(setup);
+    html=typeof payload?.html==="string"?payload.html:(typeof payload?.content==="string"?payload.content:setup);
+  }catch{}
+
+  const parseCcs=(source:string)=>{
+    const cells=[...source.matchAll(/class=["'][^"']*col-detalhes[^"']*["'][^>]*>([\\s\\S]*?)<\\/td>/gi)]
+      .map(m=>m[1].replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/\\s+/g," ").trim())
+      .filter(Boolean);
+    const rx=/\\b(\\d+)\\s*x\\s*(?:R\\$\\s*)?([\\d.,]+)\\b/i;
+    const detail=cells.find(x=>{const m=x.match(rx);return m&&Number(m[1])===installments})||cells.find(x=>rx.test(x));
+    const m=detail?.match(rx);
+    const money=(v?:string)=>{if(!v)return undefined;const n=Number(v.replace(/\\./g,"").replace(",","."));return Number.isFinite(n)?n:undefined};
+    let total=money(source.match(/(?:Total|Total\\s+Parcelas|Total\\s+financiamento)\\s*:\\s*R\\$?\\s*([\\d.,]+)/i)?.[1]);
+    total ??= money(source.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>[\\s\\S]*?R\\$?\\s*([\\d.,]+)/i)?.[1]);
+    const valueParc=money(source.match(/name=["']valor_parc\\[\\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+    const installmentValue=money(m?.[2]) ?? (valueParc!==undefined?valueParc/installments:undefined);
+    return {installmentValue,total,detail};
+  };
+
+  let parsed=parseCcs(html);
+  if(parsed.installmentValue===undefined){
+    await reloadCart(page);
+    parsed=parseCcs(await page.content());
+  }
+  if(parsed.installmentValue===undefined){
+    const dom=await page.locator(".col-detalhes").allTextContents().catch(()=>[]);
+    const rx=new RegExp(`\\b${installments}\\s*x\\s*(?:R\\$\\s*)?[\\d.,]+\\b`,`i`);
+    const detail=dom.map(x=>x.replace(/\\s+/g," ").trim()).find(x=>rx.test(x));
+    const m=detail?.match(/\\b(\\d+)\\s*x\\s*(?:R\\$\\s*)?([\\d.,]+)\\b/i);
+    const n=m?.[2]?Number(m[2].replace(/\\./g,"").replace(",",".")):undefined;
+    parsed={installmentValue:Number.isFinite(n as number)?n:undefined,total:undefined,detail};
+  }
+  if(parsed.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
+  return {installmentValue:parsed.installmentValue,total:parsed.total};
+}
+'''
+          pat=re.compile(r'async function configureCCSPayment\(page:Page,installments:number\)\{.*?\n\}\n\n(?=async function configureCCCWithEntry)',re.S)
+          s2=pat.sub(new,s,count=1)
+          if s2==s:
+            raise SystemExit('configureCCSPayment block not found')
+          p.write_text(s2)
+          v=Path('VERSION')
+          v.write_text('1.0.23-etapa8.42-correcao-ccs\n')
+          PY
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/fix-ccs.yml
+          git rm .github/workflows/fix-ccs.yml
+          git commit -m 'Corrigir parser do CCS'
+          git push
