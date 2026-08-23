@@ -20,12 +20,8 @@ app.use(cors({
 app.use(express.json({limit:"64kb"}));
 
 async function auth(req:any,res:any,next:any){
- try{
-  req.user=await verifyFirebaseBearer(req.headers.authorization);
-  next();
- }catch{
-  res.status(401).json({error:"AUTH_REQUIRED"});
- }
+ try{req.user=await verifyFirebaseBearer(req.headers.authorization);next();}
+ catch{res.status(401).json({error:"AUTH_REQUIRED"});}
 }
 
 function publicError(e:unknown){
@@ -37,7 +33,7 @@ function publicError(e:unknown){
   "CT1_INSTALLMENTS_OUT_OF_RANGE","CREDIT_REQUEST_FAILED","CREDIT_RESULT_NOT_PARSED","CT1_PRODUCT_PRICE_REQUIRED","CT1_CART_PREPARATION_FAILED","TRADITIONAL_PRODUCT_PRICE_REQUIRED","TRADITIONAL_CART_PREPARATION_FAILED",
   "TRADITIONAL_CART_TOTAL_REQUIRED","PRESTAMISTA_BAND_SETUP_FAILED","CPF_SUBMIT_FAILED","WARRANTY_SERVICE_FAILED","CT2_INSTALLMENTS_OUT_OF_RANGE","CT2_PAYMENT_SETUP_FAILED","CT2_VARIABLE_ENTRY_FAILED","CT2_PAYMENT_ID_NOT_FOUND","CT2_ENTRY_BELOW_MINIMUM",
   "48_INSTALLMENTS_OUT_OF_RANGE","48_PAYMENT_SETUP_FAILED","48_VARIABLE_ENTRY_FAILED","48_PAYMENT_ID_NOT_FOUND","48_ENTRY_BELOW_MINIMUM","NEW_CUSTOMER_CART_CLEANUP_FAILED","CART_CLEANUP_FAILED","AUXILIARY_QUANTITY_INVALID",
-  "CARD_VOLTAGE_REQUIRED","CARD_VOLTAGE_OPTION_NOT_FOUND","CARD_CPF_SUBMIT_FAILED","CARD_INSTALLMENTS_OUT_OF_RANGE","CARD_PAYMENT_SETUP_FAILED","CARD_RESULT_NOT_PARSED"
+  "CARD_VOLTAGE_REQUIRED","CARD_VOLTAGE_OPTION_NOT_FOUND","CARD_CPF_SUBMIT_FAILED","CARD_INSTALLMENTS_OUT_OF_RANGE","CARD_ENTRY_REQUIRED","CARD_VARIABLE_ENTRY_FAILED","CARD_PAYMENT_SETUP_FAILED","CARD_RESULT_NOT_PARSED","CARD_PAYMENT_ID_NOT_FOUND","CARD_ENTRY_PAYMENT_FAILED","CARD_INSTALLMENT_PAYMENT_FAILED"
  ]);
  return known.has(m)?m:"AUTOMATION_FAILED";
 }
@@ -61,43 +57,25 @@ app.post("/api/credit/simulate",auth,async(req,res)=>{
  const rawQuantity=body.auxiliaryQuantity===undefined?3:Number(body.auxiliaryQuantity);
  if(!Number.isInteger(rawQuantity)||rawQuantity<1||rawQuantity>20)return res.status(400).json({error:"AUXILIARY_QUANTITY_INVALID"});
  const request={
-  code:String(body.productCode||body.code||"").trim(),
-  plan:String(body.plan||"").toUpperCase() as "48"|"CT1"|"CT2",
-  installments:Number(body.installments),
-  downPayment:body.entry!==undefined?Number(body.entry):body.downPayment!==undefined?Number(body.downPayment):undefined,
-  cpf:body.cpf?String(body.cpf):undefined,
-  voltage:body.voltage?String(body.voltage):undefined,
-  warranty:Boolean(body.warranty),
-  auxiliaryQuantity:rawQuantity
+  code:String(body.productCode||body.code||"").trim(),plan:String(body.plan||"").toUpperCase() as "48"|"CT1"|"CT2",
+  installments:Number(body.installments),downPayment:body.entry!==undefined?Number(body.entry):body.downPayment!==undefined?Number(body.downPayment):undefined,
+  cpf:body.cpf?String(body.cpf):undefined,voltage:body.voltage?String(body.voltage):undefined,warranty:Boolean(body.warranty),auxiliaryQuantity:rawQuantity
  };
- try{
-  res.json(await withFreshClickPage(page=>simulateCredit(page,request)));
- }catch(e){
-  console.error("[POST /api/credit/simulate]",e);
-  const error=publicError(e);
+ try{res.json(await withFreshClickPage(page=>simulateCredit(page,request)))}
+ catch(e){
+  console.error("[POST /api/credit/simulate]",e);const error=publicError(e);
   res.status(["VOLTAGE_REQUIRED","CPF_REQUIRED","ENTRY_REQUIRED","CT1_INSTALLMENTS_OUT_OF_RANGE","CT2_INSTALLMENTS_OUT_OF_RANGE","CT2_ENTRY_BELOW_MINIMUM","48_INSTALLMENTS_OUT_OF_RANGE","48_ENTRY_BELOW_MINIMUM","AUXILIARY_QUANTITY_INVALID"].includes(error)?400:500).json({error});
  }
 });
 
 app.post("/api/card/simulate",auth,async(req,res)=>{
  const body=req.body||{};
- const request={
-  code:String(body.productCode||body.code||"").trim(),
-  installments:Number(body.installments),
-  cpf:body.cpf?String(body.cpf):undefined,
-  voltage:body.voltage?String(body.voltage):undefined
- };
- try{
-  res.json(await withFreshClickPage(page=>simulateCard(page,request)));
- }catch(e){
-  console.error("[POST /api/card/simulate]",e);
-  const error=publicError(e);
-  res.status(["PRODUCT_CODE_REQUIRED","CPF_REQUIRED","CARD_VOLTAGE_REQUIRED","CARD_INSTALLMENTS_OUT_OF_RANGE"].includes(error)?400:500).json({error});
+ const request={code:String(body.productCode||body.code||"").trim(),plan:String(body.plan||"CCS").toUpperCase() as "CCS"|"CCC",installments:Number(body.installments),entry:body.entry!==undefined?Number(body.entry):undefined,cpf:body.cpf?String(body.cpf):undefined,voltage:body.voltage?String(body.voltage):undefined};
+ try{res.json(await withFreshClickPage(page=>simulateCard(page,request)))}
+ catch(e){
+  console.error("[POST /api/card/simulate]",e);const error=publicError(e);
+  res.status(["PRODUCT_CODE_REQUIRED","CPF_REQUIRED","CARD_VOLTAGE_REQUIRED","CARD_INSTALLMENTS_OUT_OF_RANGE","CARD_ENTRY_REQUIRED"].includes(error)?400:500).json({error});
  }
 });
 
-app.listen(PORT,()=>{
- console.log(`XVendas Playwright backend em http://0.0.0.0:${PORT}`);
- console.log(`[robot] Plataforma Click: ${CLICK_BASE_URL}`);
- console.log(`[robot] CORS permitido: ${ALLOWED_ORIGINS.join(", ")}`);
-});
+app.listen(PORT,()=>{console.log(`XVendas Playwright backend em http://0.0.0.0:${PORT}`);console.log(`[robot] Plataforma Click: ${CLICK_BASE_URL}`);console.log(`[robot] CORS permitido: ${ALLOWED_ORIGINS.join(", ")}`);});
