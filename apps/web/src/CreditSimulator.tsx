@@ -7,6 +7,7 @@ export function CreditSimulator({defaultCode=""}:{defaultCode?:string}){
   const [withEntry,setWithEntry]=useState(false);
   const [installments,setInstallments]=useState(10);
   const [entry,setEntry]=useState("");
+  const [voltage,setVoltage]=useState("");
   const [result,setResult]=useState<any>(null);
   const [loading,setLoading]=useState(false);
 
@@ -17,10 +18,11 @@ export function CreditSimulator({defaultCode=""}:{defaultCode?:string}){
     try{
       const r=await fetch(`${ROBOT_URL}/api/credit/simulate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({code,plan,installments,downPayment:Number(entry||0)})
+        body:JSON.stringify({code,plan,installments,downPayment:Number(entry||0),voltage:voltage||undefined})
       });
       const data=await r.json();
       setResult(data);
+      if(data?.error!=="VOLTAGE_REQUIRED")setVoltage("");
     }catch(e){setResult({error:e instanceof Error?e.message:"Erro"});}
     finally{setLoading(false);}
   }
@@ -37,7 +39,10 @@ export function CreditSimulator({defaultCode=""}:{defaultCode?:string}){
       </select></label>}
       <label>{plan==="CT1"?"Parcelas":"Pagamentos totais"}<input type="number" min={plan==="CT1"?1:2} max="24" value={installments} onChange={e=>setInstallments(Number(e.target.value))}/></label>
       {(plan==="CT2"||plan==="48")&&<label>Entrada (R$)<input type="number" min="0.01" step="0.01" value={entry} onChange={e=>setEntry(e.target.value)} required/></label>}
-      <button className="primary" disabled={loading}>{loading?"Simulando...":"Simular crediário"}</button>
+      {result?.error==="VOLTAGE_REQUIRED"&&<label>Voltagem<select value={voltage} onChange={e=>setVoltage(e.target.value)} required>
+        <option value="">Selecione</option><option value="110">110V / 127V</option><option value="220">220V</option>
+      </select></label>}
+      <button className="primary" disabled={loading}>{loading?"Simulando...":result?.error==="VOLTAGE_REQUIRED"?"Continuar com a voltagem":"Simular crediário"}</button>
     </form>
     {result&&<div className={result.error?"creditResult error":"creditResult"}>
       {result.error?<><strong>A automação precisa ser calibrada</strong><p>{result.error}</p>{result.diagnostic&&<code>{result.diagnostic}</code>}</>:<pre>{JSON.stringify(result,null,2)}</pre>}
