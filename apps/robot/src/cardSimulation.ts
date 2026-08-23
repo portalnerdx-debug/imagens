@@ -55,6 +55,24 @@ async function includeProductWithoutWarranty(page:Page,code:string){
   await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 }
 
+async function parseCardPaymentHtml(html:string,installments:number){
+  const detailMatch=html.match(/class=["']col-detalhes["'][^>]*>\s*([\s\S]*?)<\/td>/i);
+  const detailText=(detailMatch?.[1]||"").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/\s+/g," ").trim();
+  const detail=detailText || html.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/\s+/g," ");
+
+  // No HTML real da Click o retorno CCS traz, por exemplo, "10x 7,99".
+  const parcelRegex=new RegExp(`(?:${installments}\\s*x\\s*|em\\s*${installments}\\s*x\\s*|${installments}\\s*[xX]\\s*)([0-9.]+,[0-9]{2})`,'i');
+  const genericRegex=/(\d+)\s*x\s*([0-9.]+,[0-9]{2})/i;
+  const match=detail.match(parcelRegex)||detail.match(genericRegex);
+  const installmentValue=match?Number((match[1]||match[2]).replace(/\./g,"").replace(",",".")):undefined;
+
+  const totalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>[^R$]*R\$\s*([0-9.]+,[0-9]{2})/i)
+    ||html.match(/name=["'](?:total_carrinho|vl_pedido)["'][^>]*value=["']([0-9.]+(?:,[0-9]{2})?)["']/i);
+  const total=totalMatch?Number(totalMatch[1].replace(/\./g,"").replace(",",".")):undefined;
+
+  return {installmentValue,total,detail:detailText};
+}
+
 async function configureCardPayment(page:Page,installments:number){
   if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
   const origin=new URL(page.url()).origin;
@@ -69,25 +87,44 @@ async function configureCardPayment(page:Page,installments:number){
       credentials:"include",cache:"no-store",
       headers:{"Accept":"application/json, text/javascript, */*; q=0.01","X-Requested-With":"XMLHttpRequest"}
     });
-    return {ok:response.ok,text:await response.text()};
+    return {ok:response.ok,status:response.status,text:await response.text()};
   },{endpoint,installments});
   if(!result.ok)throw new Error("CARD_PAYMENT_SETUP_FAILED");
-  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{
-    waitUntil:"domcontentloaded",timeout:60000
-  });
-  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 
-  const payment=page.locator("#pagamentos_pgs, form[name=\"pagamentos_pgs\"]").first();
-  const detail=await payment.locator(".col-detalhes").first().innerText({timeout:5000}).catch(()=>"");
-  const totalText=await payment.locator(".valor-total").first().innerText({timeout:3000}).catch(()=>"");
-  const body=detail||totalText;
-  const match=body.match(/(\d+)\s*x\s*([0-9\.,]+)/i);
-  const installmentValue=match?Number(match[2].replace(/\./g,"").replace(",",".")):undefined;
-  const totalMatch=totalText.match(/R\$\s*([0-9\.,]+)/i);
-  const total=totalMatch?Number(totalMatch[1].replace(/\./g,"").replace(",",".")):undefined;
+  // A resposta AJAX real da Click já traz o formulário completo de pagamento.
+  // O HTML do HAR contém diretamente "10x 7,99" e "Total: R$ 79,90".
+  let html="";
+  try{
+    const payload=JSON.parse(result.text);
+    html=typeof payload?.html==="string"?payload.html:result.text;
+  }catch{
+    html=result.text;
+  }
 
-  if(installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
-  return {installmentValue,total};
+  let parsed=await parseCardPaymentHtml(html,installments);
+
+  // Fallback para versões da Click que persistem a condição somente após o reload.
+  if(parsed.installmentValue===undefined){
+    await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{
+      waitUntil:"domcontentloaded",timeout:60000
+    });
+    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+    const bodyHtml=await page.content().catch(()=>"");
+    parsed=await parseCardPaymentHtml(bodyHtml,installments);
+  }
+
+  if(parsed.installmentValue===undefined){
+    console.error("[card] resultado CCS não identificado",{
+      installments,url:page.url(),
+      responseBytes:result.text.length,
+      hasJsonHtml:/"html"\s*:/i.test(result.text),
+      hasDetails:/col-detalhes|pagamentos_pgs/i.test(html),
+      detail:parsed.detail
+    });
+    throw new Error("CARD_RESULT_NOT_PARSED");
+  }
+
+  return {installmentValue:parsed.installmentValue,total:parsed.total};
 }
 
 export async function simulateCard(page:Page,req:CardRequest){
