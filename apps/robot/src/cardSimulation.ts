@@ -14,30 +14,20 @@ export interface CardRequest{
   voltage?:string;
 }
 
-type PaymentState={
-  entryPaymentId?:string;
-  parcelPaymentId?:string;
-  entry?:number;
-  parcelTotal?:number;
-  installmentValue?:number;
-  parcelForm?:string;
-  conveniada?:string;
-};
-
 async function chooseVoltageIfRequested(page:Page,voltage?:string){
-  const modal=page.locator("#ModalConfirmacao").first();
-  if(await modal.isVisible({timeout:2500}).catch(()=>false)){
+  const confirmationModal=page.locator("#ModalConfirmacao").first();
+  if(await confirmationModal.isVisible({timeout:2500}).catch(()=>false)){
     if(!voltage)throw new Error("CARD_VOLTAGE_REQUIRED");
     const rx=voltage==="110"?/110\s*v|127\s*v/i:/220\s*v/i;
-    const option=modal.getByRole("link",{name:rx}).first();
+    const option=confirmationModal.getByRole("link",{name:rx}).first();
     if(!await option.isVisible({timeout:2000}).catch(()=>false))throw new Error("CARD_VOLTAGE_OPTION_NOT_FOUND");
     await option.click();
     await page.waitForLoadState("domcontentloaded",{timeout:8000}).catch(()=>{});
     await page.waitForTimeout(350);
     return;
   }
-  const asks=await pageContains(page,/110\s*v|127\s*v|220\s*v|voltagem/i);
-  if(!asks)return;
+  const asksVoltage=await pageContains(page,/110\s*v|127\s*v|220\s*v|voltagem/i);
+  if(!asksVoltage)return;
   if(!voltage)throw new Error("CARD_VOLTAGE_REQUIRED");
   const rx=voltage==="110"?/110\s*v|127\s*v/i:/220\s*v/i;
   if(!await clickText(page,[rx]))throw new Error("CARD_VOLTAGE_OPTION_NOT_FOUND");
@@ -53,7 +43,10 @@ async function enterCpf(page:Page,cpf:string){
     timeout:60000
   });
   if(!response.ok())throw new Error("CARD_CPF_SUBMIT_FAILED");
-  await reloadCart(page);
+  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{
+    waitUntil:"domcontentloaded",timeout:60000
+  });
+  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 }
 
 async function includeProductWithoutWarranty(page:Page,code:string){
@@ -72,41 +65,76 @@ function parseMoney(value:string|undefined){
   return Number.isFinite(n)?n:undefined;
 }
 
-async function readPaymentState(page:Page):Promise<PaymentState>{
-  return page.evaluate(()=>{
-    const readRows=(selector:string)=>Array.from(document.querySelectorAll(`${selector} .tbodyajax tr`)).map((row:any)=>{
-      const remove=row.querySelector(".remove-payment[data-item]");
-      const form=row.querySelector("select.change-payment");
-      const conv=row.querySelector("select.selectinho2");
-      const detail=String(row.querySelector(".col-detalhes")?.textContent||"").replace(/\s+/g," ").trim();
-      const input=row.querySelector("input.valor");
-      const rawValue=input?.value||"";
-      const value=rawValue?Number(String(rawValue).replace(/\./g,"").replace(",",".")):undefined;
-      return {
-        id:remove?.getAttribute("data-item")||form?.getAttribute("data-cdpagamento")||undefined,
-        type:remove?.getAttribute("data-type")||undefined,
-        form:form?.value||undefined,
-        conv:conv?.value||undefined,
-        detail,
-        value
-      };
-    });
-    const entries=readRows("#pagamentos_ent");
-    const parcels=readRows("#pagamentos_parc");
-    const entry=entries.find(r=>r.type==="E")||entries[0];
-    const parcel=parcels.find(r=>r.type==="P"&&r.form==="200")||parcels.find(r=>r.type==="P")||parcels[0];
-    const match=String(parcel?.detail||"").match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
-    const installmentValue=match?Number(match[2].replace(/\./g,"").replace(",",".")):undefined;
-    return {
-      entryPaymentId:entry?.id,
-      parcelPaymentId:parcel?.id,
-      entry:entry?.value,
-      parcelTotal:parcel?.value,
-      installmentValue,
-      parcelForm:parcel?.form,
-      conveniada:parcel?.conv
-    };
-  }).catch(()=>({} as PaymentState));
+function parsePaymentRows(html:string){
+  const rows:Array<{id?:string;details?:string;value?:number;form?:string;conveniada?:string;type?:string}>=[];
+  const rowRegex=/<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  for(const rowMatch of html.matchAll(rowRegex)){
+    const row=rowMatch[1];
+    if(!/remove-payment/i.test(row))continue;
+    const id=row.match(/remove-payment[\s\S]*?data-item=["'](\d+)["']/i)?.[1];
+    if(!id)continue;
+    const type=row.match(/remove-payment[\s\S]*?data-type=["']([EP])["']/i)?.[1];
+    const value=parseMoney(
+      row.match(/class=["']valor["'][^>]*value=["']([^"']+)["']/i)?.[1]
+      ?? row.match(/name=["']valor_(?:ent|parc)\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]
+    );
+    const details=row.match(/class=["']col-detalhes["'][^>]*>([\s\S]*?)<\/td>/i)?.[1]
+      ?.replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/\s+/g," ").trim();
+    const form=row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected(?:=['"][^"']*['"])?[^>]*>/i)?.[1]
+      ?? row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*selected[^>]*value=['"](\d+)['"]/i)?.[1];
+    const conv=row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected(?:=['"][^"']*['"])?[^>]*>/i)?.[1]
+      ?? row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*selected[^>]*value=['"](\d+)['"]/i)?.[1];
+    rows.push({id,details,value,form,conveniada:conv,type});
+  }
+  return rows;
+}
+
+async function readPaymentState(page:Page){
+  const html=await page.content();
+  const rows=parsePaymentRows(html);
+  const entryRow=rows.find(r=>r.type==='E' || r.form==='1');
+  const parcelRow=rows.find(r=>r.type==='P' && r.form==='200')
+    ?? rows.find(r=>r.type==='P')
+    ?? rows.find(r=>r.form==='200')
+    ?? rows.find(r=>/\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||''));
+  const detail=parcelRow?.details||'';
+  const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
+  const installmentValue=parseMoney(match?.[2]);
+  return {
+    installmentValue,
+    entry:entryRow?.value,
+    entryPaymentId:entryRow?.id,
+    parcelPaymentId:parcelRow?.id,
+    parcelTotal:parcelRow?.value,
+    parcelForm:parcelRow?.form,
+    conveniada:parcelRow?.conveniada
+  };
+}
+
+function parseCardDetails(html:string,plan:CardPlan){
+  const rows=parsePaymentRows(html);
+  const entryRow=rows.find(r=>r.type==='E' || r.form==='1');
+  const parcelRow=rows.find(r=>r.type==='P' && r.form==='200')
+    ?? rows.find(r=>plan==='CCC' && r.type==='P' && r.conveniada==='3')
+    ?? rows.find(r=>r.type==='P' && /\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||''));
+  const detail=parcelRow?.details||'';
+  const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
+  const installmentValue=parseMoney(match?.[2]);
+  const parcelTotal=parseMoney(html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*(?:Total\s+Parcelas|Total\s+financiamento)[:\s]+R\$?\s*([\d.,]+)/i)?.[1]);
+  const genericTotal=parseMoney(html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*Total[:\s]+R\$?\s*([\d.,]+)/i)?.[1]);
+  const valueParc=parseMoney(html.match(/name=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+  const resolvedInstallmentValue=installmentValue ?? (valueParc!==undefined && match?.[1]?valueParc/Number(match[1]):undefined);
+  return {
+    installmentValue:resolvedInstallmentValue,
+    total:genericTotal??parcelTotal,
+    details:detail,
+    entry:entryRow?.value,
+    entryPaymentId:entryRow?.id,
+    parcelPaymentId:parcelRow?.id,
+    parcelPaymentForm:parcelRow?.form,
+    conveniada:parcelRow?.conveniada,
+    mastercardSelected:/<option[^>]*value=['"]3['"][^>]*selected/i.test(html)
+  };
 }
 
 async function setupPayment(page:Page,plan:CardPlan,qtParcelas:number){
@@ -119,7 +147,7 @@ async function setupPayment(page:Page,plan:CardPlan,qtParcelas:number){
   return response.text();
 }
 
-async function setupVariableEntry(page:Page){
+async function activateVariableEntry(page:Page){
   const origin=new URL(page.url()).origin;
   const response=await page.request.get(`${origin}/checkout_catalogo/processa_entrada_variavel_calc_ajax.php`,{
     params:{cod_pagto:"CCC",_:String(Date.now())},
@@ -129,28 +157,12 @@ async function setupVariableEntry(page:Page){
   return response.text();
 }
 
-async function setVariableEntry(page:Page,paymentId:string,entry:number){
-  const origin=new URL(page.url()).origin;
-  const response=await page.request.get(`${origin}/checkout_catalogo/processa_inclui_pagamento_variavel_ajax.php`,{
-    params:{cd_pagamento:paymentId,valor:String(entry),_:String(Date.now())},
-    headers:{referer:page.url(),"x-requested-with":"XMLHttpRequest"},timeout:60000
-  });
-  if(!response.ok())throw new Error("CARD_ENTRY_PAYMENT_FAILED");
-  const text=await response.text();
-  try{
-    const payload=JSON.parse(text);
-    if(payload?.ok===false)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
-  }catch(error){
-    if(error instanceof Error&&error.message==="CARD_ENTRY_PAYMENT_FAILED")throw error;
-  }
-}
-
 async function setPaymentForm(page:Page,params:Record<string,string>){
   const origin=new URL(page.url()).origin;
   const response=await page.request.get(`${origin}/checkout_catalogo/processa_inclui_pagamento2_ajax.php`,{
     params,headers:{referer:page.url(),"x-requested-with":"XMLHttpRequest"},timeout:60000
   });
-  if(!response.ok())throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
+  if(!response.ok())throw new Error("CARD_PAYMENT_UPDATE_FAILED");
   return response.text();
 }
 
@@ -160,8 +172,6 @@ async function setMastercard(page:Page,paymentId:string){
     params:{cd_conveniada:"3",cd_pagamento:paymentId,prevent_cache:new Date().toString(),_:String(Date.now())},
     headers:{referer:page.url(),"x-requested-with":"XMLHttpRequest"},timeout:60000
   });
-  // A Click pode responder "Unknown column 'CCC'" mesmo persistindo a seleção;
-  // a validação é feita na página recarregada, como no HAR real.
   if(!response.ok())throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
   return response.text();
 }
@@ -174,75 +184,101 @@ async function reloadCart(page:Page){
 
 async function configureCCSPayment(page:Page,installments:number){
   if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
-  await setupPayment(page,"CCS",installments);
-  await reloadCart(page);
-  const state=await readPaymentState(page);
-  if(state.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
-  return {installmentValue:state.installmentValue,total:state.parcelTotal};
+  const setup=await setupPayment(page,"CCS",installments);
+  let html=setup;
+  try{html=JSON.parse(setup)?.html||setup}catch{}
+  let parsed=parseCardDetails(html,"CCS");
+  if(parsed.installmentValue===undefined){
+    await reloadCart(page);
+    parsed=parseCardDetails(await page.content(),"CCS");
+  }
+  if(parsed.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
+  return {installmentValue:parsed.installmentValue,total:parsed.total};
 }
 
 async function configureCCCWithEntry(page:Page,installments:number,entry:number){
-  if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+  if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
   if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
 
-  // No CCC, a Click conta a entrada dentro de qt_parcelas.
+  // HAR real: 10 parcelas + 1 entrada => qt_parcelas=11.
   const totalPayments=installments+1;
   const setupText=await setupPayment(page,"CCC",totalPayments);
   let setupHtml=setupText;
   try{setupHtml=JSON.parse(setupText)?.html||setupText}catch{}
-  const setupEntryId=setupHtml.match(/data-item=["'](\d+)["']/i)?.[1];
 
-  await setupVariableEntry(page);
+  // O HTML retornado pela própria Click já traz os IDs reais de entrada e parcela.
+  // Não use o primeiro data-item, pois ele é o índice do formulário (ex.: 1).
+  const paymentIds=[...setupHtml.matchAll(/data-cdpagamento=["'](\d+)["']/gi)].map(m=>m[1]);
+  const setupEntryId=paymentIds[0];
+  const setupParcelId=paymentIds[1];
+
+  await activateVariableEntry(page);
   await reloadCart(page);
+
   let state=await readPaymentState(page);
   const entryId=state.entryPaymentId||setupEntryId;
+  const parcelIdFromSetup=state.parcelPaymentId||setupParcelId;
   if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  await setVariableEntry(page,entryId,entry);
+  // No HAR, a entrada é aplicada por processa_inclui_pagamento2_ajax.php.
+  const entryValue=entry.toFixed(2).replace(".",",");
+  const entryResult=await setPaymentForm(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:entryId,
+    cod_formpagto:"1",
+    tipo_pagto:"P",
+    valor_pagamento:entryValue,
+    _:String(Date.now())
+  });
+  if(!entryResult)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+
   await reloadCart(page);
   state=await readPaymentState(page);
-  const parcelId=state.parcelPaymentId;
+  const parcelId=state.parcelPaymentId||parcelIdFromSetup;
   if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  const parcelTotal=state.parcelTotal;
+  // Após a entrada, valor_parc[] contém o total financiado das parcelas.
+  const htmlAfterEntry=await page.content();
+  const parcelTotal=parseMoney(
+    htmlAfterEntry.match(/name=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]
+  ) ?? state.parcelTotal;
   if(parcelTotal===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
 
-  await setPaymentForm(page,{
+  const parcelResult=await setPaymentForm(page,{
     cod_pagto:"CCC",
     cd_pagamento:parcelId,
     cod_formpagto:"200",
     valor_pagamento:parcelTotal.toFixed(2).replace(".",","),
     _:String(Date.now())
   });
+  if(!parcelResult)throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
 
   await reloadCart(page);
   state=await readPaymentState(page);
-  if(state.parcelPaymentId!==parcelId||state.parcelForm!=="200"){
-    throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
-  }
+  if(state.parcelPaymentId!==parcelId||state.parcelForm!=="200")throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  // A seleção de Mastercard pode retornar texto de erro na Click, mas o HTML final
-  // é a fonte de verdade: o HAR mostra a opção 3 marcada após o reload.
+  // O HAR mostra que a conveniada 3 é Mastercard. A Click pode responder texto de erro,
+  // mas a seleção persistida é validada no carrinho recarregado.
   await setMastercard(page,parcelId);
   await reloadCart(page);
-  state=await readPaymentState(page);
 
-  let masterOk=false;
+  let final=await readPaymentState(page);
   for(let attempt=0;attempt<4;attempt++){
-    masterOk=await page.locator('#pagamentos_parc .selectinho2').evaluate((el:any)=>String(el.value)==="3").catch(()=>false);
-    if(masterOk&&state.parcelPaymentId===parcelId&&state.parcelForm==="200"&&state.installmentValue!==undefined)break;
+    const mastercard=final.conveniada==="3";
+    if(mastercard&&final.parcelPaymentId===parcelId&&final.parcelForm==="200"&&final.installmentValue!==undefined)break;
     await page.waitForTimeout(500);
     await reloadCart(page);
-    state=await readPaymentState(page);
+    final=await readPaymentState(page);
   }
 
-  if(!masterOk||state.parcelPaymentId!==parcelId||state.parcelForm!=="200"||state.installmentValue===undefined){
+  if(final.conveniada!=="3"||final.parcelPaymentId!==parcelId||final.parcelForm!=="200"||final.installmentValue===undefined){
+    console.error("[card CCC] condição não confirmada",{entryId,parcelId,setupEntryId,setupParcelId});
     throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
   }
 
   return {
-    installmentValue:state.installmentValue,
-    total:(state.entry??entry)+(state.parcelTotal??parcelTotal),
+    installmentValue:final.installmentValue,
+    total:(final.entry??entry)+(final.parcelTotal??parcelTotal),
     entry,
     cardForm:"200 - T CREDITO",
     brand:"MASTERCARD"
