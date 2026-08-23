@@ -28,11 +28,7 @@ async function request<T>(path:string,init:RequestInit={}):Promise<T>{
  const idToken=await token();
  const res=await fetch(`${ROBOT_URL}${path}`,{
   ...init,
-  headers:{
-   "content-type":"application/json",
-   "authorization":`Bearer ${idToken}`,
-   ...(init.headers||{})
-  }
+  headers:{"content-type":"application/json","authorization":`Bearer ${idToken}`,...(init.headers||{})}
  });
  const data=await res.json().catch(()=>({}));
  if(!res.ok)throw new Error(data.error||"Falha no backend de automação.");
@@ -45,11 +41,9 @@ export function lookupClickProduct(code:string){
 
 export function simulateClickCredit(input:{
  productCode:string;plan:"48"|"CT1"|"CT2";installments:number;
- entry?:number;voltage?:string;warranty:boolean;cpf?:string;
+ entry?:number;voltage?:string;warranty:boolean;cpf?:string;auxiliaryQuantity?:number;
 }){
- return request<ClickCreditResult>("/api/credit/simulate",{
-  method:"POST",body:JSON.stringify(input)
- });
+ return request<ClickCreditResult>("/api/credit/simulate",{method:"POST",body:JSON.stringify(input)});
 }
 
 export function refreshClickSession(){
