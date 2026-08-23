@@ -1,0 +1,159 @@
+name: Restore known-good CCC
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'restore known-good CCC')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore only CCC flow from known-good implementation
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('apps/robot/src/cardSimulation.ts')
+          s = p.read_text(encoding='utf-8')
+          start = s.index('async function configureCCCWithEntry(')
+          end = s.index('export async function simulateCard', start)
+
+          replacement = r'''async function readCCCState(page:Page){
+  const html=await page.content();
+  const rows:Array<{id?:string;details?:string;value?:number;form?:string;conveniada?:string;type?:string}>=[];
+  for(const m of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)){
+    const row=m[1];
+    if(!/remove-payment/i.test(row))continue;
+    const id=row.match(/remove-payment[\s\S]*?data-item=["'](\d+)["']/i)?.[1];
+    if(!id)continue;
+    const type=row.match(/remove-payment[\s\S]*?data-type=["']([EP])["']/i)?.[1];
+    const value=parseMoney(row.match(/class=["']valor["'][^>]*value=["']([^"']+)["']/i)?.[1]
+      ?? row.match(/name=["']valor_(?:ent|parc)\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+    const details=row.match(/class=["']col-detalhes["'][^>]*>([\s\S]*?)<\/td>/i)?.[1]
+      ?.replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/\s+/g,' ').trim();
+    const form=row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected/i)?.[1]
+      ?? row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*selected[^>]*value=['"](\d+)['"]/i)?.[1];
+    const conveniada=row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected/i)?.[1]
+      ?? row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*selected[^>]*value=['"](\d+)['"]/i)?.[1];
+    rows.push({id,details,value,form,conveniada,type});
+  }
+  const entryRow=rows.find(r=>r.type==='E'||r.form==='1');
+  const parcelRow=rows.find(r=>r.type==='P'&&r.form==='200')
+    ?? rows.find(r=>r.type==='P')
+    ?? rows.find(r=>r.form==='200')
+    ?? rows.find(r=>r.details&&/\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details));
+  const detail=parcelRow?.details||'';
+  const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
+  return {
+    installmentValue:parseMoney(match?.[2]),
+    entry:entryRow?.value,
+    entryPaymentId:entryRow?.id,
+    parcelPaymentId:parcelRow?.id,
+    parcelTotal:parcelRow?.value,
+    parcelForm:parcelRow?.form,
+    conveniada:parcelRow?.conveniada
+  };
+}
+
+async function configureCCCWithEntry(page:Page,installments:number,entry:number){
+  if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+  if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
+
+  // Known-good HAR flow: N parcelas + 1 entrada.
+  const totalPayments=installments+1;
+  const setupText=await setupPayment(page,"CCC",totalPayments);
+  let setupHtml=setupText;
+  try{setupHtml=JSON.parse(setupText)?.html||setupText}catch{}
+
+  // The Click response contains the real payment IDs; do not use data-item="1" as an ID.
+  const paymentIds=[...setupHtml.matchAll(/data-cdpagamento=["'](\d+)["']/gi)].map(m=>m[1]);
+  const setupEntryId=paymentIds[0];
+  const setupParcelId=paymentIds[1];
+
+  await activateVariableEntry(page);
+  await reloadCart(page);
+
+  let state=await readCCCState(page);
+  const entryId=state.entryPaymentId||setupEntryId;
+  const parcelIdFromSetup=state.parcelPaymentId||setupParcelId;
+  if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+  // Exact known-good order from the HAR: variable entry value first.
+  await setVariableEntry(page,entryId,entry);
+  await reloadCart(page);
+  state=await readCCCState(page);
+
+  // Then configure the entry as cash (cod_formpagto=1).
+  const entryResult=await setPaymentForm(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:entryId,
+    cod_formpagto:"1",
+    tipo_pagto:"P",
+    valor_pagamento:entry.toFixed(2).replace(".",","),
+    _:String(Date.now())
+  });
+  if(!entryResult)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+
+  await reloadCart(page);
+  state=await readCCCState(page);
+  const parcelId=state.parcelPaymentId||parcelIdFromSetup;
+  if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+  const htmlAfterEntry=await page.content();
+  const parcelTotal=parseMoney(htmlAfterEntry.match(/name=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]) ?? state.parcelTotal;
+  if(parcelTotal===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
+
+  // Configure the financed part as T CREDITO (200).
+  const parcelResult=await setPaymentForm(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:parcelId,
+    cod_formpagto:"200",
+    valor_pagamento:parcelTotal.toFixed(2).replace(".",","),
+    _:String(Date.now())
+  });
+  if(!parcelResult)throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
+
+  await reloadCart(page);
+  state=await readCCCState(page);
+  if(state.parcelPaymentId!==parcelId||state.parcelForm!=="200")throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+  // Mastercard is conveniada 3 in the known-good HAR.
+  await setMastercard(page,parcelId);
+  await reloadCart(page);
+
+  let final=await readCCCState(page);
+  for(let attempt=0;attempt<4;attempt++){
+    if(final.conveniada==="3"&&final.parcelPaymentId===parcelId&&final.parcelForm==="200"&&final.installmentValue!==undefined)break;
+    await page.waitForTimeout(500);
+    await reloadCart(page);
+    final=await readCCCState(page);
+  }
+
+  if(final.conveniada!=="3"||final.parcelPaymentId!==parcelId||final.parcelForm!=="200"||final.installmentValue===undefined){
+    console.error("[card CCC] condição não confirmada",{entryId,parcelId,setupEntryId,setupParcelId});
+    throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+  }
+
+  return {
+    installmentValue:final.installmentValue,
+    total:(final.entry??entry)+(final.parcelTotal??parcelTotal),
+    entry,
+    cardForm:"200 - T CREDITO",
+    brand:"MASTERCARD"
+  };
+}
+
+'''
+          p.write_text(s[:start] + replacement + s[end:], encoding='utf-8')
+          Path('VERSION').write_text('1.0.36-etapa8.55-restore-known-good-ccc\n', encoding='utf-8')
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/fix-ccc-restore-known-good.yml
+          git commit -m "restore known-good CCC"
+          git push
