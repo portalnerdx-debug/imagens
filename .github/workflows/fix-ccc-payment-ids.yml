@@ -1,0 +1,130 @@
+name: Fix CCC payment ids
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'fix CCC payment ids')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch CCC payment id detection
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('apps/robot/src/cardSimulation.ts')
+          text = path.read_text(encoding='utf-8')
+
+          helper = r'''async function getDomPaymentIds(page:Page){
+            return await page.locator('tr').evaluateAll(rows=>rows.map(row=>{
+              const text=(row.textContent||'').replace(/\s+/g,' ').trim();
+              const attrs=[
+                row.querySelector('[data-cdpagamento]')?.getAttribute('data-cdpagamento')||'',
+                row.querySelector('.remove-payment')?.getAttribute('data-item')||''
+              ];
+              const ids=attrs.filter(x=>/^\\d{5,}$/.test(x));
+              return {text,ids};
+            }));
+          }
+
+          '''
+
+          if 'async function getDomPaymentIds' not in text:
+              marker = 'async function configureCCCWithEntry(page:Page,installments:number,entry:number){'
+              text = text.replace(marker, helper + marker, 1)
+
+          start = text.index('async function configureCCCWithEntry')
+          end = text.index('\nexport async function simulateCard', start)
+
+          replacement = r'''async function configureCCCWithEntry(page:Page,installments:number,entry:number){
+            if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+            if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
+
+            const totalPayments=installments+1;
+            const setup=await setupPayment(page,"CCC",totalPayments);
+            let setupHtml=setup;try{setupHtml=JSON.parse(setup)?.html||setup}catch{}
+            const setupIds=[...cleanHtml(setupHtml).matchAll(/data-cdpagamento=["'](\\d+)["']/gi)].map(m=>m[1]);
+
+            await activateVariableEntry(page);
+            await reloadCart(page);
+
+            let state=parseCardDetails(await page.content(),"CCC");
+            let domRows=await getDomPaymentIds(page);
+            const domEntry=domRows.find(r=>/entrada/i.test(r.text)&&r.ids.length)?.ids[0];
+            const domParcel=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
+            const entryId=state.entryPaymentId||domEntry||setupIds[0];
+            if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+            await setVariableEntry(page,entryId,entry);
+            await reloadCart(page);
+            state=parseCardDetails(await page.content(),"CCC");
+            domRows=await getDomPaymentIds(page);
+            const domParcelAfter=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
+            const parcelId=state.parcelPaymentId||domParcelAfter||setupIds[1];
+            if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+            const entryResult=await includePayment2(page,{
+              cod_pagto:"CCC",
+              cd_pagamento:entryId,
+              cod_formpagto:"1",
+              tipo_pagto:"P",
+              valor_pagamento:entry.toFixed(2).replace(".",","),
+              _:String(Date.now())
+            });
+            if(!entryResult)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+
+            await blockEntryEditing(page);
+            await reloadCart(page);
+
+            state=parseCardDetails(await page.content(),"CCC");
+            domRows=await getDomPaymentIds(page);
+            const finalParcel=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0]||parcelId;
+            const htmlAfterEntry=await page.content();
+            const financedAmount=parseMoney(htmlAfterEntry.match(/(?:id|name)=["']valor_parc\\[\\]["'][^>]*value=["']([^"']+)["']/i)?.[1])??state.total??0;
+            if(!(financedAmount>0))throw new Error("CARD_RESULT_NOT_PARSED");
+
+            await includePayment2(page,{
+              cod_pagto:"CCC",
+              cd_pagamento:finalParcel,
+              cod_formpagto:"200",
+              valor_pagamento:financedAmount.toFixed(2).replace(".",","),
+              _:String(Date.now())
+            });
+
+            await setMastercard(page,finalParcel);
+            await reloadCart(page);
+
+            let final=parseCardDetails(await page.content(),"CCC");
+            for(let attempt=0;attempt<6;attempt++){
+              if(final.installmentValue!==undefined&&final.parcelPaymentForm==="200"&&final.conveniada==="3")break;
+              await page.waitForTimeout(500);
+              await reloadCart(page);
+              final=parseCardDetails(await page.content(),"CCC");
+            }
+            if(final.installmentValue===undefined||final.parcelPaymentForm!=="200"||final.conveniada!=="3")throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+            return {installmentValue:final.installmentValue,total:entry+(final.total??financedAmount),entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD"};
+          }
+
+          '''
+
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          version = Path('VERSION')
+          version.write_text('1.0.26-etapa8.45-ccc-ids-dom\n', encoding='utf-8')
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/fix-ccc-payment-ids.yml
+          git commit -m "fix CCC payment ids"
+          git push
