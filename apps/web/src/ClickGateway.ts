@@ -46,6 +46,16 @@ export function simulateClickCredit(input:{
  return request<ClickCreditResult>("/api/credit/simulate",{method:"POST",body:JSON.stringify(input)});
 }
 
+export type ClickCardResult={
+ ok:boolean;productCode:string;installments:number;installmentValue?:number;total?:number;
+ voltage?:string;message?:string;status?:string;safeStop?:string;
+};
+export function simulateClickCard(input:{
+ productCode:string;installments:number;voltage?:string;cpf?:string;
+}){
+ return request<ClickCardResult>("/api/card/simulate",{method:"POST",body:JSON.stringify(input)});
+}
+
 export function refreshClickSession(){
  return request<{ok:boolean}>("/api/session/refresh",{method:"POST",body:"{}"});
 }
