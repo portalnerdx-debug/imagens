@@ -1,0 +1,106 @@
+name: Fix CCS parser
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'fix CCS parser')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch CCS parser
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('apps/robot/src/cardSimulation.ts')
+          text = path.read_text(encoding='utf-8')
+
+          start = text.index('async function configureCCSPayment')
+          end = text.index('async function configureCCCWithEntry', start)
+
+          replacement = r'''function parseCCSResult(html:string,installments:number){
+            const normalized=html.replace(/&nbsp;/gi," ").replace(/\\"/g,'"');
+            const rows=[...normalized.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map(m=>m[1]);
+
+            // O CCS retorna na própria resposta AJAX uma linha com 200 - T CREDITO
+            // e o detalhe final, por exemplo: 10x 7,99.
+            const targetRows=rows.filter(row=>
+              /200\s*-\s*T\s*CREDITO/i.test(row) &&
+              /class=["'][^"']*col-detalhes[^"']*["']/i.test(row)
+            );
+
+            const candidates=[...targetRows,...rows];
+            for(const row of candidates){
+              const detail=row.match(/class=["'][^"']*col-detalhes[^"']*["'][^>]*>[\s\S]*?(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)[\s\S]*?<\/td>/i);
+              if(!detail)continue;
+
+              const count=Number(detail[1]);
+              if(count!==installments)continue;
+
+              const installmentValue=parseMoney(detail[2]);
+              if(installmentValue===undefined)continue;
+
+              const total=parseMoney(
+                row.match(/valor-total[^>]*>[\s\S]*?R\$\s*([\d.,]+)/i)?.[1]
+              );
+              return {installmentValue,total};
+            }
+
+            // Fallback: a linha pode estar fora do <tr> esperado; o HAR mostra
+            // diretamente .col-detalhes com "10x 7,99".
+            const direct=[...normalized.matchAll(
+              /class=["'][^"']*col-detalhes[^"']*["'][^>]*>[\s\S]*?(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)[\s\S]*?<\/td>/gi
+            )]
+              .map(m=>({count:Number(m[1]),installmentValue:parseMoney(m[2])}))
+              .find(item=>item.count===installments && item.installmentValue!==undefined);
+
+            return direct
+              ? {installmentValue:direct.installmentValue,total:undefined}
+              : undefined;
+          }
+
+          async function configureCCSPayment(page:Page,installments:number){
+            if(!Number.isInteger(installments)||installments<1||installments>24)
+              throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+
+            const setup=await setupPayment(page,"CCS",installments);
+            let payload:any;
+            try{payload=JSON.parse(setup);}catch{}
+
+            const html=typeof payload?.html==="string"?payload.html:setup;
+            let parsed=parseCCSResult(html,installments);
+
+            if(!parsed?.installmentValue){
+              await reloadCart(page);
+              parsed=parseCCSResult(await page.content(),installments);
+            }
+
+            if(!parsed?.installmentValue)
+              throw new Error("CARD_RESULT_NOT_PARSED");
+
+            return {installmentValue:parsed.installmentValue,total:parsed.total};
+          }
+
+'''
+
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          version = Path('VERSION')
+          version.write_text('1.0.24-etapa8.43-correcao-ccs\n', encoding='utf-8')
+
+      - name: Commit patch and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/fix-ccs-parser.yml
+          git commit -m "fix CCS parser"
+          git push
