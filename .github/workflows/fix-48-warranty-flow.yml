@@ -1,0 +1,41 @@
+name: Fix 48 warranty flow from working HAR
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'fix 48 warranty flow')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch only plan 48 warranty service handling
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('apps/robot/src/creditSimulation.ts')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''  const selectedWarranty=await chooseWarranty(page,Boolean(req.warranty));\n  const baseRequiredProducts=await prepareBaseCreditCart(page,req.plan,auxiliaryQuantity);\n  const warrantyResult=await applyTraditionalWarrantyService(page,req.code,Boolean(req.warranty),selectedWarranty.serviceCode);\n  const warranty={...selectedWarranty,...warrantyResult};\n  const prestamistaProduct=await preparePrestamistaBand(page,warranty.cartTotalAfterWarranty);'''
+
+          new = '''  const selectedWarranty=await chooseWarranty(page,Boolean(req.warranty));\n  const baseRequiredProducts=await prepareBaseCreditCart(page,req.plan,auxiliaryQuantity);\n\n  let warrantyResult;\n  if(req.plan==="48"){\n   // Working 48 HARs apply warranty through carrinho.php?op_garantia=...\n   // and do not call processa_servico_ajax.php. Read the cart total directly.\n   const totalText=await page.locator(".valor-total-ajax").first().innerText({timeout:4000}).catch(()=>"");\n   const totalMatch=totalText.match(/R\\$\\s*([\\d.]+,\\d{2})/i);\n   const cartTotalAfterWarranty=totalMatch?Number(totalMatch[1].replace(/\\./g,"").replace(",",".")):undefined;\n   if(cartTotalAfterWarranty===undefined)throw new Error("WARRANTY_CART_TOTAL_NOT_PARSED");\n   warrantyResult={shown:true,selected:Boolean(req.warranty),serviceCode:selectedWarranty.serviceCode,cartTotalAfterWarranty,message:Boolean(req.warranty)?"Garantia aplicada pelo fluxo do carrinho.":"Produto mantido no fluxo normal do carrinho."};\n  }else{\n   warrantyResult=await applyTraditionalWarrantyService(page,req.code,Boolean(req.warranty),selectedWarranty.serviceCode);\n  }\n  const warranty={...selectedWarranty,...warrantyResult};\n  const prestamistaProduct=await preparePrestamistaBand(page,warranty.cartTotalAfterWarranty);'''
+
+          if old not in s:
+            raise SystemExit('48 target block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          Path('VERSION').write_text('1.0.33-etapa8.52-48-har-flow\n', encoding='utf-8')
+
+      - name: Commit patched files and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/creditSimulation.ts VERSION .github/workflows/fix-48-warranty-flow.yml
+          git commit -m "fix 48 warranty flow"
+          git push
