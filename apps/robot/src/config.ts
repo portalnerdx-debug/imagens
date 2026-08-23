@@ -16,7 +16,8 @@ export const CLICK_HEADLESS=String(process.env.CLICK_HEADLESS??"true").toLowerCa
 export const CLICK_CHROMIUM_ARGS=["--disable-dev-shm-usage"];
 export const CLICK_USERNAME=(process.env.CLICK_USERNAME||"").trim();
 export const CLICK_PASSWORD=process.env.CLICK_PASSWORD||"";
-export const CLICK_DEFAULT_CPF=(process.env.CLICK_DEFAULT_CPF||"").replace(/\D/g,"");
+// CPF padrão da consulta. Pode ser sobrescrito por CLICK_DEFAULT_CPF no ambiente.
+export const CLICK_DEFAULT_CPF=(process.env.CLICK_DEFAULT_CPF||"10304987506").replace(/\D/g,"");
 export const FIREBASE_PROJECT_ID=(process.env.FIREBASE_PROJECT_ID||"vendas-211b4").trim();
 export const ALLOWED_ORIGINS=(process.env.ALLOWED_ORIGIN||"http://localhost:5173")
  .split(",")
