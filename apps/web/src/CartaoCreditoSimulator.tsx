@@ -1,7 +1,10 @@
-import React,{useState} from "react";
+import React,{useEffect,useState} from "react";
 import {simulateClickCard} from "./ClickGateway";
+import "./credit-progress.css";
 
 const DEFAULT_CPF="10304987506";
+const ccsPhases=["Iniciando sessão da Plataforma Click","Localizando o produto","Adicionando o produto principal","Verificando voltagem (se necessária)","Enviando CPF","Configurando CCS — cartão sem entrada","Calculando parcelas","Finalizando consulta"] as const;
+const cccPhases=["Iniciando sessão da Plataforma Click","Localizando o produto","Adicionando o produto principal","Verificando voltagem (se necessária)","Enviando CPF","Criando CCC — cartão com entrada","Aplicando entrada em dinheiro","Configurando T CREDITO nas parcelas","Selecionando bandeira MASTERCARD","Calculando valor das parcelas","Finalizando consulta"] as const;
 function money(value:any){return Number(value).toFixed(2).replace(".",",");}
 function friendlyError(e:any){
  const raw=String(e?.message||e||"");
@@ -29,6 +32,15 @@ export function CartaoCreditoSimulator(){
  const [loading,setLoading]=useState(false);
  const [error,setError]=useState("");
  const [result,setResult]=useState<any>(null);
+ const [progressIndex,setProgressIndex]=useState(-1);
+ const phases=plan==="CCC"?cccPhases:ccsPhases;
+
+ useEffect(()=>{
+  if(!loading){setProgressIndex(-1);return}
+  setProgressIndex(0);
+  const timer=window.setInterval(()=>setProgressIndex(current=>Math.min(current+1,phases.length-2)),1100);
+  return()=>window.clearInterval(timer);
+ },[loading,plan,phases.length]);
 
  async function simulate(){
   setError("");setResult(null);
@@ -40,11 +52,16 @@ export function CartaoCreditoSimulator(){
   const entryValue=Number(entry.replace(/\./g,"").replace(",","."))||0;
   if(plan==="CCC"&&entryValue<=0){setError("Informe a entrada em dinheiro.");return;}
   setLoading(true);
-  try{setResult(await simulateClickCard({productCode:clean,plan,installments,...(plan==="CCC"?{entry:entryValue}:{}),voltage:voltage||undefined,cpf:cleanCpf}));}
-  catch(e){setError(friendlyError(e))}
+  try{
+   const data=await simulateClickCard({productCode:clean,plan,installments,...(plan==="CCC"?{entry:entryValue}:{}),voltage:voltage||undefined,cpf:cleanCpf});
+   setProgressIndex(phases.length-1);
+   setResult(data);
+  }catch(e){setError(friendlyError(e))}
   finally{setLoading(false)}
  }
 
+ const currentPhase=loading?phases[Math.max(progressIndex,0)]:result?"Consulta concluída":"Aguardando consulta";
+ const progressPercent=loading?Math.min(94,Math.max(5,Math.round(((progressIndex+1)/phases.length)*100))):result?100:0;
  return <section className="creditSimulator">
   <div className="creditHead"><div><span className="step">💳 Cartão</span><h3>Consultar cartão de crédito</h3></div><span>{plan==="CCS"?"Sem entrada":"Com entrada"} • 1 a 24</span></div>
   <div className="creditGrid">
@@ -55,6 +72,7 @@ export function CartaoCreditoSimulator(){
    <label>Voltagem<select value={voltage} onChange={e=>setVoltage(e.target.value)}><option value="">Não se aplica / escolher depois</option><option value="110">110/127V</option><option value="220">220V</option></select></label>
    <label className="cpfField">CPF para consulta<input value={cpf} onChange={e=>setCpf(e.target.value)} inputMode="numeric" autoComplete="off" placeholder="CPF usado na consulta"/></label>
   </div>
+  {loading&&<div className="creditProgress" aria-live="polite"><div className="creditProgressTop"><strong>{currentPhase}</strong><span>{progressPercent}%</span></div><div className="creditProgressBar"><span style={{width:`${progressPercent}%`}}/></div><div className="creditProgressList">{phases.map((phase,index)=><div key={phase} className={index<progressIndex?"done":index===progressIndex?"active":"pending"}><span>{index<progressIndex?"✓":index===progressIndex?"●":"○"}</span>{phase}{plan==="CCC"&&phase.includes("entrada")&&<b>R$ {entry||"0,00"}</b>}</div>)}</div></div>}
   <p className="creditSafety"><strong>{plan==="CCC"?"CCC configurado":"Sem adicionais"}</strong><span>{plan==="CCC"?"A entrada é paga em dinheiro; as parcelas usam 200 - T CREDITO e a bandeira MASTERCARD.":"O produto informado é consultado individualmente, sem produtos auxiliares, prestamista ou garantia."}</span></p>
   <button className="primary creditAction" onClick={simulate} disabled={loading}>{loading?"Consultando cartão...":"Consultar cartão de crédito"}</button>
   {error&&<div className="creditError">{error}</div>}
