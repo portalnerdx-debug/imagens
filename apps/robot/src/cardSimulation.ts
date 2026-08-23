@@ -164,54 +164,79 @@ async function configureCCSPayment(page:Page,installments:number){
   return parsed;
 }
 
+async function getDomPaymentIds(page:Page){
+  return await page.locator('tr').evaluateAll(rows=>rows.map(row=>{
+    const text=(row.textContent||'').replace(/\s+/g,' ').trim();
+    const attrs=[
+      row.querySelector('[data-cdpagamento]')?.getAttribute('data-cdpagamento')||'',
+      row.querySelector('.remove-payment')?.getAttribute('data-item')||''
+    ];
+    const ids=attrs.filter(x=>/^\\d{5,}$/.test(x));
+    return {text,ids};
+  }));
+}
+
 async function configureCCCWithEntry(page:Page,installments:number,entry:number){
   if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
   if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
 
-  // HAR real: 10 parcelas + 1 entrada => qt_parcelas=11.
   const totalPayments=installments+1;
   const setup=await setupPayment(page,"CCC",totalPayments);
   let setupHtml=setup;try{setupHtml=JSON.parse(setup)?.html||setup}catch{}
-  const setupIds=[...cleanHtml(setupHtml).matchAll(/data-cdpagamento=["'](\d+)["']/gi)].map(m=>m[1]);
+  const setupIds=[...cleanHtml(setupHtml).matchAll(/data-cdpagamento=["'](\\d+)["']/gi)].map(m=>m[1]);
 
   await activateVariableEntry(page);
   await reloadCart(page);
 
   let state=parseCardDetails(await page.content(),"CCC");
-  const entryId=state.entryPaymentId||setupIds[0];
-  const parcelIdHint=state.parcelPaymentId||setupIds[1];
+  let domRows=await getDomPaymentIds(page);
+  const domEntry=domRows.find(r=>/entrada/i.test(r.text)&&r.ids.length)?.ids[0];
+  const domParcel=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
+  const entryId=state.entryPaymentId||domEntry||setupIds[0];
   if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  // HAR real: grava primeiro o valor da entrada na condição variável.
   await setVariableEntry(page,entryId,entry);
   await reloadCart(page);
   state=parseCardDetails(await page.content(),"CCC");
+  domRows=await getDomPaymentIds(page);
+  const domParcelAfter=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
+  const parcelId=state.parcelPaymentId||domParcelAfter||setupIds[1];
+  if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  // Depois transforma a entrada em DINHEIRO (cod_formpagto=1).
-  const entryResult=await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:state.entryPaymentId||entryId,cod_formpagto:"1",tipo_pagto:"P",valor_pagamento:entry.toFixed(2).replace(".",","),_:String(Date.now())});
+  const entryResult=await includePayment2(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:entryId,
+    cod_formpagto:"1",
+    tipo_pagto:"P",
+    valor_pagamento:entry.toFixed(2).replace(".",","),
+    _:String(Date.now())
+  });
   if(!entryResult)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+
   await blockEntryEditing(page);
   await reloadCart(page);
 
+  state=parseCardDetails(await page.content(),"CCC");
+  domRows=await getDomPaymentIds(page);
+  const finalParcel=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0]||parcelId;
   const htmlAfterEntry=await page.content();
-  state=parseCardDetails(htmlAfterEntry,"CCC");
-  const parcelId=state.parcelPaymentId||parcelIdHint;
-  if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
-
-  const financedAmount=parseMoney(htmlAfterEntry.match(/(?:id|name)=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1])??state.total??0;
+  const financedAmount=parseMoney(htmlAfterEntry.match(/(?:id|name)=["']valor_parc\\[\\]["'][^>]*value=["']([^"']+)["']/i)?.[1])??state.total??0;
   if(!(financedAmount>0))throw new Error("CARD_RESULT_NOT_PARSED");
 
-  // Parcelas: 200 - T CREDITO.
-  await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:parcelId,cod_formpagto:"200",valor_pagamento:financedAmount.toFixed(2).replace(".",","),_:String(Date.now())});
+  await includePayment2(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:finalParcel,
+    cod_formpagto:"200",
+    valor_pagamento:financedAmount.toFixed(2).replace(".",","),
+    _:String(Date.now())
+  });
 
-  // Bandeira: Mastercard = 3. A resposta deste endpoint pode conter texto de erro;
-  // o estado persistido no carrinho é a fonte da verdade.
-  await setMastercard(page,parcelId);
+  await setMastercard(page,finalParcel);
   await reloadCart(page);
 
   let final=parseCardDetails(await page.content(),"CCC");
-  for(let attempt=0;attempt<5;attempt++){
-    if(final.installmentValue!==undefined&&final.parcelPaymentId===parcelId&&final.parcelPaymentForm==="200"&&final.conveniada==="3"&&final.mastercardSelected)break;
+  for(let attempt=0;attempt<6;attempt++){
+    if(final.installmentValue!==undefined&&final.parcelPaymentForm==="200"&&final.conveniada==="3")break;
     await page.waitForTimeout(500);
     await reloadCart(page);
     final=parseCardDetails(await page.content(),"CCC");
@@ -219,6 +244,7 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
   if(final.installmentValue===undefined||final.parcelPaymentForm!=="200"||final.conveniada!=="3")throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
   return {installmentValue:final.installmentValue,total:entry+(final.total??financedAmount),entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD"};
 }
+
 
 export async function simulateCard(page:Page,req:CardRequest){
   if(!req.code)throw new Error("PRODUCT_CODE_REQUIRED");
