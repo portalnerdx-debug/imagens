@@ -97,7 +97,7 @@ async function readPaymentState(page:Page){
     ?? rows.find(r=>r.type==='P')
     ?? rows.find(r=>r.form==='200')
     ?? rows.find(r=>/\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||''));
-  const detail=parcelRow?.details||'';
+  const detail=parcelRow?.details||"";
   const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
   const installmentValue=parseMoney(match?.[2]);
   return {
@@ -117,7 +117,7 @@ function parseCardDetails(html:string,plan:CardPlan){
   const parcelRow=rows.find(r=>r.type==='P' && r.form==='200')
     ?? rows.find(r=>plan==='CCC' && r.type==='P' && r.conveniada==='3')
     ?? rows.find(r=>r.type==='P' && /\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||''));
-  const detail=parcelRow?.details||'';
+  const detail=parcelRow?.details||"";
   const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
   const installmentValue=parseMoney(match?.[2]);
   const parcelTotal=parseMoney(html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*(?:Total\s+Parcelas|Total\s+financiamento)[:\s]+R\$?\s*([\d.,]+)/i)?.[1]);
@@ -154,6 +154,16 @@ async function activateVariableEntry(page:Page){
     headers:{referer:page.url(),"x-requested-with":"XMLHttpRequest"},timeout:60000
   });
   if(!response.ok())throw new Error("CARD_VARIABLE_ENTRY_FAILED");
+  return response.text();
+}
+
+async function setVariableEntry(page:Page,paymentId:string,entry:number){
+  const origin=new URL(page.url()).origin;
+  const response=await page.request.get(`${origin}/checkout_catalogo/processa_inclui_pagamento_variavel_ajax.php`,{
+    params:{cd_pagamento:paymentId,valor:String(entry),_:String(Date.now())},
+    headers:{referer:page.url(),"x-requested-with":"XMLHttpRequest"},timeout:60000
+  });
+  if(!response.ok())throw new Error("CARD_ENTRY_PAYMENT_FAILED");
   return response.text();
 }
 
@@ -220,7 +230,12 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
   const parcelIdFromSetup=state.parcelPaymentId||setupParcelId;
   if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
-  // No HAR, a entrada é aplicada por processa_inclui_pagamento2_ajax.php.
+  // No HAR, primeiro grava o valor da entrada na condição variável.
+  await setVariableEntry(page,entryId,entry);
+  await reloadCart(page);
+  state=await readPaymentState(page);
+
+  // Depois aplica a forma de pagamento da entrada em dinheiro.
   const entryValue=entry.toFixed(2).replace(".",",");
   const entryResult=await setPaymentForm(page,{
     cod_pagto:"CCC",
