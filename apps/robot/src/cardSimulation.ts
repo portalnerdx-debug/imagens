@@ -72,33 +72,47 @@ function parsePaymentRows(html:string){
     const row=rowMatch[1];
     if(!/remove-payment/i.test(row))continue;
     const id=row.match(/remove-payment[^>]*data-item=["'](\d+)["']/i)?.[1];
-    const value=parseMoney(row.match(/class=["']valor["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+    const value=parseMoney(row.match(/class=["']valor["'][^>]*value=["']([^"']+)["']/i)?.[1]
+      ?? row.match(/name=["']valor_(?:ent|parc)\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
     const details=row.match(/class=["']col-detalhes["'][^>]*>([\s\S]*?)<\/td>/i)?.[1]
       ?.replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/\s+/g," ").trim();
-    const form=row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected/i)?.[1];
-    const conv=row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected/i)?.[1];
+    const form=row.match(/class=["']change-payment["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected(?:=['"][^"']*['"])?[^>]*>/i)?.[1];
+    const conv=row.match(/class=["']selectinho2["'][\s\S]*?<option[^>]*value=['"](\d+)['"][^>]*selected(?:=['"][^"']*['"])?[^>]*>/i)?.[1];
     rows.push({id,details,value,form,conveniada:conv});
   }
   return rows;
 }
 
-function parseCardDetails(html:string){
+function parseCardDetails(html:string,plan:CardPlan){
   const rows=parsePaymentRows(html);
-  const parcelRow=rows.find(r=>/\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||"") && !/1x\s*(?:R\$)?\s*0?[,\.]01\b/i.test(r.details||""));
+  const entryRow=rows.find(r=>r.form==="1" || (!!r.id && /1x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||"")));
+  const parcelRow=rows.find(r=>
+    r.form==="200" ||
+    (plan==="CCC" && r.conveniada==="3") ||
+    (plan==="CCS" && /\d+\s*x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||"") && r.form!=="1")
+  );
   const detail=parcelRow?.details||"";
   const match=detail.match(/(\d+)\s*x\s*(?:R\$)?\s*([\d.,]+)/i);
   const installmentValue=parseMoney(match?.[2]);
-  const totalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*(?:Total(?:\s+entrada)?\s*)?R\$?\s*([\d.,]+)/i);
-  const total=parseMoney(totalMatch?.[1]);
-  const entryRow=rows.find(r=>r.id && /1x\s*(?:R\$)?\s*[\d.,]+/i.test(r.details||""));
+
+  const parcelTotalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*Total\s+Parcelas:\s*R\$?\s*([\d.,]+)/i);
+  const entryTotalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*Total\s+Entrada:\s*R\$?\s*([\d.,]+)/i);
+  const genericTotalMatch=html.match(/class=["'][^"']*valor-total[^"']*["'][^>]*>\s*(?:Total\s*)?R\$?\s*([\d.,]+)/i);
+  const parcelTotal=parseMoney(parcelTotalMatch?.[1]);
+  const entryTotal=parseMoney(entryTotalMatch?.[1]);
+  const genericTotal=parseMoney(genericTotalMatch?.[1]);
+  const total=plan==="CCC"
+    ? ((entryTotal??entryRow?.value??0)+(parcelTotal??(genericTotal!==undefined&&entryTotal===undefined?genericTotal:0)) || undefined)
+    : (genericTotal??parcelTotal);
+  const valueParc=parseMoney(html.match(/name=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+  const resolvedInstallmentValue=installmentValue ?? (valueParc!==undefined && match?.[1] ? valueParc/Number(match[1]) : undefined);
   return {
-    installmentValue,total,details:detail,
-    entry:entryRow?.value,entryPaymentId:entryRow?.id,
-    parcelPaymentId:parcelRow?.id,
+    installmentValue:resolvedInstallmentValue,total,details:detail,
+    entry:entryRow?.value,entryPaymentId:entryRow?.id,parcelPaymentId:parcelRow?.id,
+    parcelPaymentForm:parcelRow?.form,conveniada:parcelRow?.conveniada,
     mastercardSelected:/<option[^>]*value=['"]3['"][^>]*selected/i.test(html)
   };
 }
-
 async function configureCCSPayment(page:Page,installments:number){
   if(!Number.isInteger(installments)||installments<1||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
   const origin=new URL(page.url()).origin;
@@ -115,11 +129,11 @@ async function configureCCSPayment(page:Page,installments:number){
   if(!result.ok)throw new Error("CARD_PAYMENT_SETUP_FAILED");
   let html="";
   try{const payload=JSON.parse(result.text);html=typeof payload?.html==="string"?payload.html:result.text;}catch{html=result.text;}
-  let parsed=parseCardDetails(html);
+  let parsed=parseCardDetails(html,"CCS");
   if(parsed.installmentValue===undefined){
     await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
     await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
-    parsed=parseCardDetails(await page.content());
+    parsed=parseCardDetails(await page.content(),"CCS");
   }
   if(parsed.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
   return parsed;
@@ -174,12 +188,12 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
   await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
   await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
 
-  let state=parseCardDetails(await page.content());
+  let state=parseCardDetails(await page.content(),"CCC");
   if(!state.entryPaymentId||!state.parcelPaymentId){
     await activateVariableEntry(page);
     await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
     await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
-    state=parseCardDetails(await page.content());
+    state=parseCardDetails(await page.content(),"CCC");
   }
   if(!state.entryPaymentId||!state.parcelPaymentId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
@@ -190,18 +204,15 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
 
   await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
   await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
-  state=parseCardDetails(await page.content());
+  const htmlAfterEntry=await page.content();
+  state=parseCardDetails(htmlAfterEntry,"CCC");
   const parcelId=state.parcelPaymentId;
   if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
-
-  const htmlAfterEntry=await page.content();
   const parcelBase=parseMoney(htmlAfterEntry.match(/id=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
   const financedAmount=parcelBase ?? Math.max(0,(state.total||0)-entry);
   const parcelResult=await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:parcelId,cod_formpagto:"200",valor_pagamento:financedAmount.toFixed(2).replace(".",","),_:String(Date.now())});
   if(!parcelResult.ok)throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
 
-  // 3 = MASTERCARD. A Click pode retornar texto de erro nesta chamada, mas o HAR
-  // mostra que a seleção é refletida no carrinho; a validação final é feita pelo HTML.
   await page.evaluate(async({origin,parcelId})=>{
     const url=new URL("/checkout_catalogo/processa_conveniada_ajax.php",origin);
     url.searchParams.set("cd_conveniada","3");url.searchParams.set("cd_pagamento",parcelId);url.searchParams.set("prevent_cache",new Date().toString());url.searchParams.set("_",String(Date.now()));
@@ -210,9 +221,16 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
 
   await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
   await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
-  const final=parseCardDetails(await page.content());
+  let final=parseCardDetails(await page.content(),"CCC");
+  for(let attempt=0;attempt<4;attempt++){
+    if(final.installmentValue!==undefined && final.parcelPaymentForm==="200" && final.conveniada==="3" && final.mastercardSelected)break;
+    await page.waitForTimeout(500);
+    await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
+    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+    final=parseCardDetails(await page.content(),"CCC");
+  }
   if(final.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
-  return {...final,entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD",plan:"CCC" as const};
+  return {...final,entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD",plan:"CCC"};
 }
 
 export async function simulateCard(page:Page,req:CardRequest){
@@ -236,7 +254,6 @@ export async function simulateCard(page:Page,req:CardRequest){
     const payment=await configureCCSPayment(page,req.installments);
     return {ok:true,productCode:req.code,plan:"CCS" as const,installments:req.installments,installmentValue:payment.installmentValue,total:payment.total,voltage:req.voltage||undefined,status:"CARD_CREDIT_SIMULATED",message:"Cartão de crédito sem entrada (CCS) consultado na Plataforma Click. Nenhuma compra foi confirmada.",safeStop:"Simulação de cartão CCS concluída. Nenhuma compra ou pedido foi confirmado.",product};
   }
-
   const payment=await configureCCCWithEntry(page,req.installments,Number(req.entry||0));
   return {ok:true,productCode:req.code,plan:"CCC" as const,installments:req.installments,entry:payment.entry,installmentValue:payment.installmentValue,total:payment.total,voltage:req.voltage||undefined,cardForm:payment.cardForm,brand:payment.brand,status:"CARD_CREDIT_WITH_ENTRY_SIMULATED",message:"Cartão de crédito com entrada (CCC) consultado com dinheiro na entrada, T CREDITO nas parcelas e MASTERCARD na bandeira.",safeStop:"Simulação de cartão CCC concluída. Nenhuma compra ou pedido foi confirmado.",product};
 }
