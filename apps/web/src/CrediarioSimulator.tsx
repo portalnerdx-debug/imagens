@@ -4,7 +4,7 @@ import {lookupClickProduct,simulateClickCredit} from "./ClickGateway";
 import "./credit-progress.css";
 
 export type CreditPlan="48"|"CT1"|"CT2";
-const DEFAULT_CPF="12345678909";
+const DEFAULT_CPF="10304987506";
 function entryNumber(value:string){const parsed=Number(value.replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));return Number.isFinite(parsed)?parsed:0;}
 function money(value:any){return Number(value).toFixed(2).replace(".",",");}
 function friendlyError(e:any){
