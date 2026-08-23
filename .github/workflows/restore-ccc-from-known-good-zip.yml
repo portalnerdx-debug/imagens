@@ -1,0 +1,128 @@
+name: Restore CCC from known-good ZIP only
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  restore-ccc:
+    if: "!contains(github.event.head_commit.message, 'restore CCC from known-good ZIP only')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace only configureCCCWithEntry
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('apps/robot/src/cardSimulation.ts')
+          s = p.read_text(encoding='utf-8')
+
+          new_fn = r'''async function configureCCCWithEntry(page:Page,installments:number,entry:number){
+  if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+  if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
+
+  const origin=new URL(page.url()).origin;
+  const setup=await page.evaluate(async({origin,installments})=>{
+    const url=new URL("/checkout_catalogo/processa_inclui_pagamento_ajax.php",origin);
+    url.searchParams.set("cod_pagto","CCC");
+    url.searchParams.set("qt_parcelas",String(installments));
+    url.searchParams.set("ajax","1");
+    url.searchParams.set("_",String(Date.now()));
+    const response=await fetch(url.toString(),{
+      credentials:"include",cache:"no-store",
+      headers:{"Accept":"application/json, text/javascript, */*; q=0.01","X-Requested-With":"XMLHttpRequest"}
+    });
+    return {ok:response.ok,text:await response.text()};
+  },{origin,installments});
+  if(!setup.ok)throw new Error("CARD_PAYMENT_SETUP_FAILED");
+
+  await activateVariableEntry(page);
+  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
+  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+
+  let html=await page.content();
+  let state=parseCardDetails(html,"CCC");
+  if(!state.entryPaymentId||!state.parcelPaymentId){
+    await activateVariableEntry(page);
+    await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
+    await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+    html=await page.content();
+    state=parseCardDetails(html,"CCC");
+  }
+  if(!state.entryPaymentId||!state.parcelPaymentId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+  const entryValue=entry.toFixed(2).replace(".",",");
+  const entryResult=await includePayment2(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:state.entryPaymentId,
+    cod_formpagto:"1",
+    tipo_pagto:"P",
+    valor_pagamento:entryValue,
+    _:String(Date.now())
+  });
+  if(!entryResult.ok)throw new Error("CARD_ENTRY_PAYMENT_FAILED");
+
+  await blockEntryEditing(page);
+
+  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
+  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+  html=await page.content();
+  state=parseCardDetails(html,"CCC");
+
+  const parcelId=state.parcelPaymentId||state.entryPaymentId;
+  if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+  const afterEntry=parseMoney(
+    html.match(/id=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]
+  ) ?? Math.max(0,(state.total||0)-entry);
+
+  const parcelResult=await includePayment2(page,{
+    cod_pagto:"CCC",
+    cd_pagamento:parcelId,
+    cod_formpagto:"200",
+    valor_pagamento:afterEntry.toFixed(2).replace(".",","),
+    _:String(Date.now())
+  });
+  if(!parcelResult.ok)throw new Error("CARD_INSTALLMENT_PAYMENT_FAILED");
+
+  await page.evaluate(async({origin,parcelId})=>{
+    const url=new URL("/checkout_catalogo/processa_conveniada_ajax.php",origin);
+    url.searchParams.set("cd_conveniada","3");
+    url.searchParams.set("cd_pagamento",parcelId);
+    url.searchParams.set("prevent_cache",new Date().toString());
+    url.searchParams.set("_",String(Date.now()));
+    await fetch(url.toString(),{
+      credentials:"include",cache:"no-store",
+      headers:{"X-Requested-With":"XMLHttpRequest"}
+    });
+  },{origin,parcelId});
+
+  await page.goto(`${origin}/checkout_catalogo/carrinho-entrega.php?reload=sim`,{waitUntil:"domcontentloaded",timeout:60000});
+  await page.waitForLoadState("networkidle",{timeout:8000}).catch(()=>{});
+  const finalHtml=await page.content();
+  const final=parseCardDetails(finalHtml,"CCC");
+  if(final.installmentValue===undefined)throw new Error("CARD_RESULT_NOT_PARSED");
+  return {...final,entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD",plan:"CCC"};
+}'''
+
+          pattern = re.compile(r'async function configureCCCWithEntry\(page:Page,installments:number,entry:number\)\{.*?\n\}\n\n\nexport async function simulateCard', re.S)
+          replacement = new_fn + '\n\nexport async function simulateCard'
+          out, n = pattern.subn(replacement, s, count=1)
+          if n != 1:
+              raise SystemExit(f'CCC function not found exactly once: {n}')
+
+          p.write_text(out, encoding='utf-8')
+          Path('VERSION').write_text('1.0.40-etapa8.59-ccc-from-known-good-zip\n', encoding='utf-8')
+
+      - name: Commit only CCC restoration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/restore-ccc-from-known-good-zip.yml
+          git commit -m "restore CCC from known-good ZIP only"
+          git push
