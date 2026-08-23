@@ -1,0 +1,13 @@
+CCC flow reference:
+CCC
+qt_parcelas = installments + 1
+extract real payment IDs from Click response
+set variable entry amount
+reload cart
+set entry payment form 1 (DINHEIRO)
+reload cart
+set parcel payment form 200 (T CREDITO)
+set Mastercard conveniada 3
+reload cart
+validate final HTML
+return installment value
