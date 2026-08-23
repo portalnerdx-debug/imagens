@@ -1,6 +1,7 @@
 import React,{useEffect,useMemo,useState} from "react";
 import {useLiveProducts} from "./LiveProductContext";
 import {lookupClickProduct,simulateClickCredit} from "./ClickGateway";
+import "./credit-progress.css";
 
 export type CreditPlan="48"|"CT1"|"CT2";
 const DEFAULT_CPF="12345678909";
@@ -9,9 +10,7 @@ function entryNumber(value:string){
  const parsed=Number(value.replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
  return Number.isFinite(parsed)?parsed:0;
 }
-
 function money(value:any){return Number(value).toFixed(2).replace(".",",");}
-
 function friendlyError(e:any){
  const raw=String(e?.message||e||"");
  if(raw.includes("CLICK_CREDENTIALS_NOT_CONFIGURED"))return "As credenciais da Plataforma Click não estão configuradas no Render.";
@@ -122,7 +121,7 @@ export function CrediarioSimulator(){
   finally{setLoading(false)}
  }
 
- const currentPhase=loading?phaseNames[Math.max(progressIndex,0)]:result?"Consulta concluída": "Aguardando consulta";
+ const currentPhase=loading?phaseNames[Math.max(progressIndex,0)]:result?"Consulta concluída":"Aguardando consulta";
  const progressPercent=loading?Math.max(5,Math.round(((progressIndex+1)/phaseNames.length)*100)):result?100:0;
 
  return <section className="creditSimulator">
@@ -140,7 +139,6 @@ export function CrediarioSimulator(){
    <label className="cpfField">CPF para consulta<input value={cpf} onChange={e=>setCpf(e.target.value)} inputMode="numeric" autoComplete="off" placeholder="CPF usado na consulta"/></label>
   </div>
   {product&&<div className="creditProductFound"><strong>✓ {product.code}</strong><span>{product.name||"Produto localizado"}</span>{product.price!==undefined&&<b>R$ {money(product.price)}</b>}</div>}
-
   {loading&&<div className="creditProgress" aria-live="polite">
    <div className="creditProgressTop"><strong>{currentPhase}</strong><span>{progressPercent}%</span></div>
    <div className="creditProgressBar"><span style={{width:`${progressPercent}%`}}/></div>
@@ -148,7 +146,6 @@ export function CrediarioSimulator(){
     {phaseNames.map((phase,index)=><div key={phase} className={index<progressIndex?"done":index===progressIndex?"active":"pending"}><span>{index<progressIndex?"✓":index===progressIndex?"●":"○"}</span>{phase}{phase.includes("801911")&&<b>{auxiliaryQuantity}x</b>}</div>)}
    </div>
   </div>}
-
   <button className="primary creditAction" onClick={simulate} disabled={loading||searching}>{loading?"Consultando na Plataforma Click...":"Consultar crediário"}</button>
   {error&&<div className="creditError">{error}</div>}
   {result&&<div className="creditResult creditReceipt">
