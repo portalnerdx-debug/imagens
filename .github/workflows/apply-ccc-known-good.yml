@@ -1,0 +1,38 @@
+name: Apply CCC known-good flow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'Apply CCC known-good flow')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace only configureCCCWithEntry from known-good commit
+        shell: python
+        run: |
+          import subprocess
+          from pathlib import Path
+          current = Path('apps/robot/src/cardSimulation.ts').read_text(encoding='utf-8')
+          good = subprocess.check_output([
+              'git','show','2710d4eb428fd0e02689ce2b931ca78b2c2476e6:apps/robot/src/cardSimulation.ts'
+          ], text=True)
+          def extract(s):
+              start=s.index('async function configureCCCWithEntry')
+              end=s.index('\n\nexport async function simulateCard', start)
+              return s[start:end]
+          patched = current[:current.index('async function configureCCCWithEntry')] + extract(good) + current[current.index('\n\nexport async function simulateCard'):]
+          Path('apps/robot/src/cardSimulation.ts').write_text(patched, encoding='utf-8')
+          Path('VERSION').write_text('1.0.38-etapa8.57-ccc-known-good-only\n', encoding='utf-8')
+      - name: Commit CCC-only patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/apply-ccc-known-good.yml
+          git commit -m "Apply CCC known-good flow"
+          git push
