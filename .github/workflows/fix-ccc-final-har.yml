@@ -1,0 +1,112 @@
+name: Fix CCC final HAR flow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'fix CCC final HAR flow')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch only CCC flow
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('apps/robot/src/cardSimulation.ts')
+          s = p.read_text(encoding='utf-8')
+
+          start = s.index('async function getDomPaymentIds')
+          end = s.index('export async function simulateCard', start)
+
+          prefix = s[:start]
+          suffix = s[end:]
+
+          replacement = r'''async function getDomPaymentIds(page:Page){
+  return await page.locator('tr').evaluateAll(rows=>rows.map(row=>{
+    const text=(row.textContent||'').replace(/\s+/g,' ').trim();
+    const ids=Array.from(row.querySelectorAll('[data-cdpagamento]'))
+      .map(el=>el.getAttribute('data-cdpagamento')||'')
+      .filter(value=>/^\d{5,}$/.test(value));
+    return {text,ids};
+  }));
+}
+
+async function configureCCCWithEntry(page:Page,installments:number,entry:number){
+  if(!Number.isInteger(installments)||installments<2||installments>24)throw new Error("CARD_INSTALLMENTS_OUT_OF_RANGE");
+  if(!(entry>0))throw new Error("CARD_ENTRY_REQUIRED");
+
+  // Reproduce the working HAR: 10 parcels + 1 entry = qt_parcelas 11.
+  const totalPayments=installments+1;
+  const setup=await setupPayment(page,"CCC",totalPayments);
+  let setupHtml=setup;
+  try{setupHtml=JSON.parse(setup)?.html||setup}catch{}
+  const setupIds=[...cleanHtml(setupHtml).matchAll(/data-cdpagamento=["'](\d+)["']/gi)].map(m=>m[1]);
+
+  await activateVariableEntry(page);
+  await reloadCart(page);
+
+  let domRows=await getDomPaymentIds(page);
+  let state=parseCardDetails(await page.content(),"CCC");
+  const entryDom=domRows.find(r=>/entrada/i.test(r.text)&&r.ids.length)?.ids[0];
+  const entryId=state.entryPaymentId||entryDom||setupIds[0];
+  if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+  // HAR: processa_inclui_pagamento_variavel_ajax.php -> valor da entrada.
+  await setVariableEntry(page,entryId,entry);
+  await reloadCart(page);
+
+  domRows=await getDomPaymentIds(page);
+  state=parseCardDetails(await page.content(),"CCC");
+  const parcelDom=domRows.find(r=>/t\s*credito/i.test(r.text)&&r.ids.length)?.ids[0]
+    ||domRows.find(r=>/\d+\s*x\s*(?:r\$)?\s*[\d.,]+/i.test(r.text)&&r.ids.length)?.ids[0];
+  const parcelId=state.parcelPaymentId||parcelDom||setupIds[1];
+  if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+
+  // HAR: entrada = DINHEIRO (1).
+  await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:entryId,cod_formpagto:"1",tipo_pagto:"P",valor_pagamento:entry.toFixed(2).replace(".",","),_:String(Date.now())});
+  await blockEntryEditing(page);
+  await reloadCart(page);
+
+  // Read the financed value from the actual input, not from the displayed grand total.
+  let financedAmount=parseMoney(await page.locator('[name="valor_parc[]"]').first().inputValue().catch(()=>''));
+  if(!(financedAmount>0)){
+    const html=await page.content();
+    financedAmount=parseMoney(html.match(/(?:id|name)=["']valor_parc\[\]["'][^>]*value=["']([^"']+)["']/i)?.[1]);
+  }
+  if(!(financedAmount>0))throw new Error("CARD_RESULT_NOT_PARSED");
+
+  // HAR: parcelas = 200 - T CREDITO.
+  await includePayment2(page,{cod_pagto:"CCC",cd_pagamento:parcelId,cod_formpagto:"200",valor_pagamento:financedAmount.toFixed(2).replace(".",","),_:String(Date.now())});
+
+  // HAR: bandeira Mastercard = 3. Endpoint may return an SQL text error, so final state is validated after reload.
+  await setMastercard(page,parcelId);
+  await reloadCart(page);
+
+  let final=parseCardDetails(await page.content(),"CCC");
+  for(let attempt=0;attempt<8;attempt++){
+    if(final.installmentValue!==undefined&&final.parcelPaymentForm==="200"&&final.conveniada==="3")break;
+    await page.waitForTimeout(500);
+    await reloadCart(page);
+    final=parseCardDetails(await page.content(),"CCC");
+  }
+  if(final.installmentValue===undefined||final.parcelPaymentForm!=="200"||final.conveniada!=="3")throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
+  return {installmentValue:final.installmentValue,total:entry+(final.total??financedAmount),entry,cardForm:"200 - T CREDITO",brand:"MASTERCARD"};
+}
+
+'''
+
+          p.write_text(prefix + replacement + suffix, encoding='utf-8')
+          Path('VERSION').write_text('1.0.34-etapa8.53-ccc-har-final\n', encoding='utf-8')
+
+      - name: Commit CCC-only patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/robot/src/cardSimulation.ts VERSION .github/workflows/fix-ccc-final-har.yml
+          git commit -m "fix CCC final HAR flow"
+          git push
