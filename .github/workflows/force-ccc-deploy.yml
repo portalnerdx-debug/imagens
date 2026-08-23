@@ -1,0 +1,28 @@
+name: Force CCC deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  force:
+    if: "!contains(github.event.head_commit.message, 'force CCC deploy')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Force version update
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          Path('VERSION').write_text('1.0.29-etapa8.48-force-ccc\n', encoding='utf-8')
+          PY
+      - name: Commit force deploy
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "force CCC deploy"
+          git push
