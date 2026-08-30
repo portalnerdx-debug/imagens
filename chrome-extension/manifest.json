@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "XVendas Click Automação Visível",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Abre a Plataforma Click em uma aba real e executa a consulta de forma visível.",
   "permissions": ["tabs", "storage", "scripting"],
-  "host_permissions": ["https://plataformaclick.com.br/*", "https://*.plataformaclick.com.br/*", "https://*.web.app/*", "https://*.firebaseapp.com/*", "http://localhost/*"],
+  "host_permissions": ["https://*/*", "http://localhost/*"],
   "background": {"service_worker": "background.js", "type": "module"},
   "content_scripts": [
-    {"matches":["https://*.web.app/*","https://*.firebaseapp.com/*","http://localhost/*"],"js":["content-xvendas.js"],"run_at":"document_start"},
+    {"matches":["https://*/*","http://localhost/*"],"js":["content-xvendas.js"],"run_at":"document_start"},
     {"matches":["https://plataformaclick.com.br/*","https://*.plataformaclick.com.br/*"],"js":["content-click.js"],"run_at":"document_idle"}
   ],
   "action": {"default_title":"XVendas Click"}
