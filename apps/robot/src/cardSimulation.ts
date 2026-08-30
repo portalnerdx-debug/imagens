@@ -191,7 +191,7 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
   let state=parseCardDetails(await page.content(),"CCC");
   let domRows=await getDomPaymentIds(page);
   const domEntry=domRows.find(r=>/entrada/i.test(r.text)&&r.ids.length)?.ids[0];
-  const domParcel=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
+  const domParcel=domRows.find(r=>/T\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
   const entryId=state.entryPaymentId||domEntry||setupIds[0];
   if(!entryId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
@@ -199,7 +199,7 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
   await reloadCart(page);
   state=parseCardDetails(await page.content(),"CCC");
   domRows=await getDomPaymentIds(page);
-  const domParcelAfter=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
+  const domParcelAfter=domRows.find(r=>/T\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0];
   const parcelId=state.parcelPaymentId||domParcelAfter||setupIds[1];
   if(!parcelId)throw new Error("CARD_PAYMENT_ID_NOT_FOUND");
 
@@ -218,7 +218,7 @@ async function configureCCCWithEntry(page:Page,installments:number,entry:number)
 
   state=parseCardDetails(await page.content(),"CCC");
   domRows=await getDomPaymentIds(page);
-  const finalParcel=domRows.find(r=>/T\\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0]||parcelId;
+  const finalParcel=domRows.find(r=>/T\s*CREDITO/i.test(r.text)&&r.ids.length)?.ids[0]||parcelId;
   const htmlAfterEntry=await page.content();
   const financedAmount=parseMoney(htmlAfterEntry.match(/(?:id|name)=["']valor_parc\\[\\]["'][^>]*value=["']([^"']+)["']/i)?.[1])??state.total??0;
   if(!(financedAmount>0))throw new Error("CARD_RESULT_NOT_PARSED");
