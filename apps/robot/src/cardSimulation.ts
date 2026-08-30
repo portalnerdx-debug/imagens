@@ -266,8 +266,8 @@ export async function simulateCard(page:Page,req:CardRequest){
 
   if(req.plan==="CCS"){
     const payment=await configureCCSPayment(page,req.installments);
-    return {ok:true,productCode:req.code,plan:"CCS" as const,installments:req.installments,installmentValue:payment.installmentValue,total:payment.total,voltage:req.voltage||undefined,status:"CARD_CREDIT_SIMULATED",message:"Cartão de crédito sem entrada (CCS) consultado na Plataforma Click. Nenhuma compra foi confirmada.",safeStop:"Simulação de cartão CCS concluída. Nenhuma compra ou pedido foi confirmado.",product};
+    return {ok:true,productCode:req.code,plan:"CCS" as const,installments:req.installments,installmentValue:payment.installmentValue,total:payment.total,voltage:req.voltage||undefined,clickUrl:page.url(),status:"CARD_CREDIT_SIMULATED",message:"Cartão de crédito sem entrada (CCS) consultado na Plataforma Click. Nenhuma compra foi confirmada.",safeStop:"Simulação de cartão CCS concluída. Nenhuma compra ou pedido foi confirmado.",product};
   }
   const payment=await configureCCCWithEntry(page,req.installments,Number(req.entry||0));
-  return {ok:true,productCode:req.code,plan:"CCC" as const,installments:req.installments,entry:payment.entry,installmentValue:payment.installmentValue,total:payment.total,voltage:req.voltage||undefined,cardForm:payment.cardForm,brand:payment.brand,status:"CARD_CREDIT_WITH_ENTRY_SIMULATED",message:"Cartão de crédito com entrada (CCC) consultado com dinheiro na entrada, T CREDITO nas parcelas e MASTERCARD na bandeira.",safeStop:"Simulação de cartão CCC concluída. Nenhuma compra ou pedido foi confirmado.",product};
+  return {ok:true,productCode:req.code,plan:"CCC" as const,installments:req.installments,entry:payment.entry,installmentValue:payment.installmentValue,total:payment.total,voltage:req.voltage||undefined,cardForm:payment.cardForm,brand:payment.brand,clickUrl:page.url(),status:"CARD_CREDIT_WITH_ENTRY_SIMULATED",message:"Cartão de crédito com entrada (CCC) consultado com dinheiro na entrada, T CREDITO nas parcelas e MASTERCARD na bandeira.",safeStop:"Simulação de cartão CCC concluída. Nenhuma compra ou pedido foi confirmado.",product};
 }
