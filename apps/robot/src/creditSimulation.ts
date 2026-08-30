@@ -198,7 +198,8 @@ async function simulateCt1(page:Page,req:CreditRequest,context:{product:unknown;
   if(retried.ok){await reloadPaymentPage(page,origin);text=await readCt1ResultText(page);result=extractCreditResult(text,req);}
  }
  if(result.installmentValue===undefined){throw new Error("CREDIT_RESULT_NOT_PARSED");}
- return {ok:true,...result,...context,status:"CT1_SIMULATED",message:"Tradicional sem entrada consultado na Plataforma Click.",safeStop:"Simulação CT1 concluída. Nenhuma compra ou pedido foi confirmado."};
+ return {ok:true,...result,...context,clickUrl:page.url(),
+  status:"CT1_SIMULATED",message:"Tradicional sem entrada consultado na Plataforma Click.",safeStop:"Simulação CT1 concluída. Nenhuma compra ou pedido foi confirmado."};
 }
 
 async function readCt1ResultText(page:Page){
@@ -296,7 +297,7 @@ async function simulateVariableEntry(page:Page,req:CreditRequest,context:{produc
  const text=(await page.locator("body").innerText()).slice(0,40000);
  const result=extractCreditResult(text,req);
  if(result.installmentValue===undefined||result.total===undefined)throw new Error("CREDIT_RESULT_NOT_PARSED");
- return {ok:true,...result,...context,minimumEntry:minimum,status:req.plan==="48"?"NEW_CUSTOMER_48_SIMULATED":"CT2_SIMULATED",message:req.plan==="48"?"Cliente Novo com entrada variável consultado na Plataforma Click.":"Tradicional com entrada variável consultado na Plataforma Click.",safeStop:`Simulação ${req.plan} concluída. Nenhuma compra ou pedido foi confirmado.`};
+ return {ok:true,...result,...context,minimumEntry:minimum,clickUrl:page.url(),status:req.plan==="48"?"NEW_CUSTOMER_48_SIMULATED":"CT2_SIMULATED",message:req.plan==="48"?"Cliente Novo com entrada variável consultado na Plataforma Click.":"Tradicional com entrada variável consultado na Plataforma Click.",safeStop:`Simulação ${req.plan} concluída. Nenhuma compra ou pedido foi confirmado.`};
 }
 
 export async function simulateCredit(page:Page,req:CreditRequest){
