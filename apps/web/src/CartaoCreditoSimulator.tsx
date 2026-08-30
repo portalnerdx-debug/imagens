@@ -56,6 +56,10 @@ export function CartaoCreditoSimulator(){
    const data=await simulateClickCard({productCode:clean,plan,installments,...(plan==="CCC"?{entry:entryValue}:{}),voltage:voltage||undefined,cpf:cleanCpf});
    setProgressIndex(phases.length-1);
    setResult(data);
+   if(data?.clickUrl){
+    const opened=window.open(data.clickUrl,"_blank","noopener,noreferrer");
+    if(opened)opened.opener=null;
+   }
   }catch(e){setError(friendlyError(e))}
   finally{setLoading(false)}
  }
