@@ -10,7 +10,7 @@ export type ClickProduct={
 };
 export type ClickCreditResult={
  ok:boolean;productCode?:string;plan:"48"|"CT1"|"CT2";installments:number;
- entry?:number;installmentValue?:number;total?:number;message?:string;status?:string;
+ entry?:number;installmentValue?:number;total?:number;message?:string;status?:string;clickUrl?:string;
  safeStop?:string;capturedValues?:number[];
  ct1RequiredProducts?:Array<{code:string;quantity:number;reason?:string}>;
  requiredProducts?:Array<{code:string;quantity:number;reason?:string}>;
@@ -49,7 +49,7 @@ export function simulateClickCredit(input:{
 export type ClickCardResult={
  ok:boolean;productCode:string;plan:"CCS"|"CCC";installments:number;entry?:number;
  installmentValue?:number;total?:number;voltage?:string;cardForm?:string;brand?:string;
- message?:string;status?:string;safeStop?:string;
+ message?:string;status?:string;safeStop?:string;clickUrl?:string;
 };
 export function simulateClickCard(input:{
  productCode:string;plan:"CCS"|"CCC";installments:number;entry?:number;voltage?:string;cpf?:string;
