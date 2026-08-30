@@ -43,6 +43,7 @@ export function CartaoCreditoSimulator(){
  },[loading,plan,phases.length]);
 
  async function simulate(){
+  const resultTab=window.open("about:blank","_blank");
   setError("");setResult(null);
   const clean=code.trim(), cleanCpf=cpf.replace(/\D/g,"");
   if(!clean){setError("Digite o código do produto.");return;}
@@ -56,11 +57,12 @@ export function CartaoCreditoSimulator(){
    const data=await simulateClickCard({productCode:clean,plan,installments,...(plan==="CCC"?{entry:entryValue}:{}),voltage:voltage||undefined,cpf:cleanCpf});
    setProgressIndex(phases.length-1);
    setResult(data);
-   if(data?.clickUrl){
-    const opened=window.open(data.clickUrl,"_blank","noopener,noreferrer");
-    if(opened)opened.opener=null;
+   if(data?.clickUrl&&resultTab){
+    resultTab.location.replace(data.clickUrl);
+   }else if(resultTab){
+    resultTab.close();
    }
-  }catch(e){setError(friendlyError(e))}
+  }catch(e){if(resultTab)resultTab.close();setError(friendlyError(e))}
   finally{setLoading(false)}
  }
 
